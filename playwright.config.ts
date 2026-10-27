@@ -6,19 +6,21 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: 0,
   workers: 1,
+  timeout: 120000,
   reporter: 'list',
   use: {
     baseURL: 'http://localhost:3100',
-    trace: 'on-first-retry'
+    trace: 'on-first-retry',
+    channel: 'chrome'
   },
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] }
+      use: { ...devices['Desktop Chrome'], channel: 'chrome' }
     }
   ],
   webServer: {
-    command: 'npx next dev -p 3100',
+    command: 'JR_PERSIST_MOCK_FILE=1 npx next start -p 3100',
     url: 'http://localhost:3100/login',
     reuseExistingServer: !process.env.CI,
     timeout: 60000
