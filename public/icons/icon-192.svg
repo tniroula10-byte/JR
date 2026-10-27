@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F1424" />
+      <stop offset="100%" stop-color="#070913" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#A78BFA" />
+      <stop offset="100%" stop-color="#7C3AED" />
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="42" fill="url(#bg)" stroke="#8B5CF6" stroke-width="4" />
+  <polygon points="96,28 152,58 152,126 96,164 40,126 40,58" fill="none" stroke="url(#accent)" stroke-width="8" />
+  <text x="96" y="112" text-anchor="middle" fill="#F8FAFC" font-family="system-ui, sans-serif" font-weight="800" font-size="52">JR</text>
+</svg>

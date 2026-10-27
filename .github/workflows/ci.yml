@@ -1,0 +1,38 @@
+name: John Rambo CI & RLS Security Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint & Security Hygiene Check
+        run: npm run lint
+
+      - name: Strict TypeScript Check
+        run: npm run typecheck
+
+      - name: Verify PostgreSQL RLS Coverage on All Tables
+        run: npm run verify:rls
+
+      - name: Run Unit & Integration Tests (Vitest)
+        run: npm test
+
+      - name: Production Build Verification
+        run: npm run build

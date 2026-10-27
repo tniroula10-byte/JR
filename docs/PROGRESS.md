@@ -4,9 +4,9 @@
 
 ## Current Status Summary
 
-- **Current Phase**: Phase 0 (Scaffold, design tokens, shadcn setup, linting, CI, data-adapter skeleton) — **IN PROGRESS**
+- **Current Phase**: Phase 1 (Full frontend on realistic mock data for all three roles, screenshots at 360, 390, 768 and 1280 px, no layout breaks, accessibility score >= 90) — **IN PROGRESS**
 - **Environment Mode**: Mock Data Adapter (`lib/data/mock/`) — `.env.local` not yet provisioned with external Supabase credentials (documented in `docs/HUMAN-TODO.md`).
-- **Next Action**: Set up `package.json`, TypeScript strict mode (`tsconfig.json`), Tailwind CSS + design tokens (`app/globals.css`), shadcn UI primitives (`components/ui/`), CI workflows (`.github/workflows/ci.yml`), core utilities (`lib/money.ts`, `lib/time.ts`, `lib/rate-limit.ts`), and the typed `lib/data/` repository skeleton.
+- **Next Action**: Run Playwright browser verification across all Customer, Employee, and Boss screens at `360px`, `390px`, `768px`, and `1280px` viewports, save screenshots to `docs/screenshots/`, verify zero horizontal overflow / layout breaks and accessibility compliance, then commit Phase 1 and proceed to Phase 2.
 
 ---
 
@@ -15,8 +15,8 @@
 | Phase | Scope | Status | Self-Check & Evidence |
 | :--- | :--- | :--- | :--- |
 | **Phase A** | Folders, `AGENTS.md`, planning docs (`01`–`08`), `PROGRESS.md`, `HUMAN-TODO.md`, `DECISIONS.md`, `runbook.md`, `security-checklist.md` | ✅ Completed | Verified via `ls -la` that all 16 documentation/config files and all 34 directories exist and align with the specification (2026-10-28T01:10+05:30). |
-| **Phase 0** | Next.js App Router scaffold, strict TS, Tailwind + design tokens, shadcn primitives, linting, CI workflows, data-adapter skeleton | 🔄 In Progress | Setting up Next.js, Tailwind, Vitest, Playwright, and `lib/data/` |
-| **Phase 1** | Full frontend on realistic mock data for all 3 roles (`customer`, `employee`, `boss`) with loading, empty, and error states | ⏳ Pending | — |
+| **Phase 0** | Next.js App Router scaffold, strict TS, Tailwind + design tokens, shadcn primitives, linting, CI workflows, data-adapter skeleton | ✅ Completed | `npm run lint` (`0 violations`), `npm run typecheck` (`0 errors`), and `npm run build` (`41/41 routes built`) passed (2026-10-28T01:54+05:30). |
+| **Phase 1** | Full frontend on realistic mock data for all 3 roles (`customer`, `employee`, `boss`) with loading, empty, and error states | 🔄 In Progress | Running browser checks & capturing screenshots across 360px, 390px, 768px, and 1280px viewports |
 | **Phase 2** | Supabase schema (`supabase/migrations`), enums, triggers, helpers, RLS & storage policies, `supabase/apply_all.sql`, magic-link auth, invite rules, boss bootstrap (`scripts/seed-boss.ts`), route guards, supabase data adapter, SQL tests | ⏳ Pending | — |
 | **Phase 3** | User management (invite, suspend, flags, aliases), products & validated image upload, hidden product protection | ⏳ Pending | — |
 | **Phase 4** | Chat: RPCs, attribution isolation, realtime, unread counts, shared inbox, handler claim, notifications | ⏳ Pending | — |

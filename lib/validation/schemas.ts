@@ -1,0 +1,155 @@
+/**
+ * Shared Zod Validation Schemas (`lib/validation/schemas.ts`)
+ * Used across client forms, Server Actions, API routes, and unit tests.
+ */
+import { z } from 'zod';
+
+export const E164PhoneSchema = z
+  .string()
+  .trim()
+  .regex(/^\+[1-9]\d{6,14}$/, 'Phone must be in E.164 format (e.g., +919876543210)');
+
+export const EmailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .email('Enter a valid email address');
+
+export const MagicLinkLoginSchema = z.object({
+  email: EmailSchema
+});
+
+export const InviteUserSchema = z.object({
+  email: EmailSchema,
+  fullName: z.string().trim().min(2, 'Full name must be at least 2 characters').max(80),
+  phone: E164PhoneSchema.optional().or(z.literal('')),
+  intendedRole: z.enum(['customer', 'employee']),
+  publicAlias: z.string().trim().min(2).max(40).optional()
+});
+
+export const UpdateCustomerProfileSchema = z.object({
+  fullName: z.string().trim().min(2, 'Name is too short').max(80, 'Name is too long'),
+  email: EmailSchema,
+  phone: E164PhoneSchema
+});
+
+export const SubmitOfferSchema = z.object({
+  productId: z.string().min(1, 'Product ID is required'),
+  offeredPricePaise: z
+    .number()
+    .int('Offer must be in integer paise')
+    .min(100, 'Minimum offer is ₹1 (100 paise)')
+    .max(100_000_000, 'Offer exceeds sanity cap of ₹10,00,000'),
+  clientMsgId: z.string().min(4).max(120)
+});
+
+export const RespondToOfferSchema = z
+  .object({
+    offerId: z.string().min(1),
+    action: z.enum(['counter', 'accept', 'reject']),
+    counterPricePaise: z.number().int().positive().max(100_000_000).optional(),
+    note: z.string().trim().max(500).optional()
+  })
+  .refine(
+    (data) => (data.action === 'counter' ? typeof data.counterPricePaise === 'number' && data.counterPricePaise >= 100 : true),
+    { message: 'Counter offer requires a valid counter price in paise', path: ['counterPricePaise'] }
+  );
+
+export const SendMessageSchema = z.object({
+  conversationId: z.string().min(1),
+  body: z.string().trim().min(1, 'Message cannot be empty').max(2000, 'Message is too long'),
+  clientMsgId: z.string().min(4).max(120)
+});
+
+export const CreateTicketSchema = z.object({
+  subject: z.string().trim().min(4, 'Subject must be at least 4 characters').max(140),
+  description: z.string().trim().min(10, 'Description must be at least 10 characters').max(4000),
+  category: z.enum(['general', 'points_delivery', 'offer_inquiry', 'account_support']),
+  priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
+  requestedEmployeeId: z.string().optional().nullable()
+});
+
+export const ReplyTicketSchema = z.object({
+  ticketId: z.string().min(1),
+  body: z.string().trim().min(1, 'Reply cannot be empty').max(3000)
+});
+
+export const TransitionTicketSchema = z.object({
+  ticketId: z.string().min(1),
+  toStatus: z.enum([
+    'open',
+    'assigned',
+    'in_progress',
+    'waiting_for_customer',
+    'resolved',
+    'closed'
+  ])
+});
+
+export const AssignTicketSchema = z.object({
+  ticketId: z.string().min(1),
+  employeeId: z.string().min(1)
+});
+
+export const ProductUpsertSchema = z.object({
+  id: z.string().optional(),
+  gameName: z.string().trim().min(2).max(80),
+  title: z.string().trim().min(3).max(120),
+  pointsQty: z.number().int().positive().max(1_000_000_000),
+  description: z.string().trim().min(5).max(2000),
+  imagePath: z.string().trim().max(500).optional().nullable(),
+  pricePaise: z.number().int().min(100).max(100_000_000),
+  status: z.enum(['available', 'sold_out', 'hidden'])
+});
+
+export const StaffFlagsUpdateSchema = z.object({
+  employeeId: z.string().min(1),
+  publicAlias: z.string().trim().min(2).max(40),
+  customerSelectable: z.boolean(),
+  acceptsTickets: z.boolean(),
+  canManageProducts: z.boolean(),
+  canPublishStories: z.boolean(),
+  canPostCustomerAnnouncements: z.boolean()
+});
+
+export const AppSettingsUpdateSchema = z.object({
+  employeeInboxScope: z.enum(['all', 'assigned_only']),
+  customerCanPickEmployee: z.boolean(),
+  ticketAutoCloseDays: z.number().int().min(1).max(90),
+  offerSanityMaxPaise: z.number().int().min(100_00).max(500_000_000),
+  businessHoursOnly: z.boolean()
+});
+
+export const StaffAnnouncementCreateSchema = z.object({
+  title: z.string().trim().min(3).max(140),
+  body: z.string().trim().min(5).max(3000),
+  priority: z.enum(['normal', 'important', 'urgent'])
+});
+
+export const CustomerAnnouncementCreateSchema = z.object({
+  title: z.string().trim().min(3).max(140),
+  body: z.string().trim().min(5).max(3000),
+  pinned: z.boolean().default(false)
+});
+
+export const StoryCreateSchema = z.object({
+  kind: z.enum(['text', 'image', 'video']),
+  caption: z.string().trim().min(2).max(500),
+  mediaPath: z.string().trim().max(500).optional().nullable(),
+  bgStyle: z.string().trim().max(120).default('from-violet-900 via-indigo-950 to-slate-950')
+});
+
+export const UploadSignRequestSchema = z.object({
+  bucket: z.enum(['product-media', 'story-media', 'avatars']),
+  fileName: z.string().trim().min(1).max(180),
+  mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'video/mp4']),
+  byteSize: z.number().int().positive().max(15 * 1024 * 1024)
+}).refine(
+  (data) => {
+    if (data.mimeType === 'video/mp4') {
+      return data.bucket === 'story-media' && data.byteSize <= 15 * 1024 * 1024;
+    }
+    return data.byteSize <= 5 * 1024 * 1024;
+  },
+  { message: 'Images must be <= 5 MB and videos <= 15 MB (story-media only)' }
+);
