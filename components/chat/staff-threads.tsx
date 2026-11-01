@@ -1,16 +1,15 @@
 'use client';
 
 /**
- * Shared Boss–Employee Private Threads (`components/chat/staff-threads.tsx`)
- * Decision 8: One thread per employee.
- * - The Boss and THAT employee can read and write it.
- * - The other employees can read it (`SELECT`) for transparency, but CANNOT write (`INSERT`).
- * - Customers have zero access.
+ * JR Family — All-Staff Group Chat & Member Threads (`components/chat/staff-threads.tsx`)
+ * Includes:
+ * 1. JR Family Group Chat between all Employees (GUZ, NOX, BSTURN, ANKY) and Boss (BOKA).
+ * 2. Direct member threads where every employee can text every other employee and Boss (BOKA).
  */
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Eye, Lock, Send } from 'lucide-react';
+import { Send, Shield, Users } from 'lucide-react';
 import { sendStaffThreadMessageAction } from '@/actions';
 import { Badge, Button, Card, Input } from '@/components/ui/primitives';
 import type { StaffThread, StaffThreadMessage, UserRole } from '@/lib/data/types';
@@ -37,10 +36,11 @@ export function StaffThreadsClient({
   const [sending, setSending] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
+  const isGroupSelected = selectedThread?.id === 'sthread-group';
+
+  // Every employee and Boss can message in the group chat and in every member thread
   const canWriteThread = Boolean(
-    selectedThread &&
-      (callerRole === 'boss' ||
-        (callerRole === 'employee' && selectedThread.employeeId === callerId))
+    selectedThread && (callerRole === 'boss' || callerRole === 'employee')
   );
 
   async function handleSend(e: React.FormEvent) {
@@ -68,15 +68,11 @@ export function StaffThreadsClient({
     <div className="space-y-5">
       <div>
         <h1 className="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-2">
-          <Lock className="h-5 w-5 text-violet-400" aria-hidden="true" />
-          <span>
-            {callerRole === 'boss'
-              ? 'Internal Boss–Employee Threads (4 Specialists)'
-              : 'Boss Direct Line & Colleague Thread Transparency'}
-          </span>
+          <Users className="h-5 w-5 text-emerald-400" aria-hidden="true" />
+          <span>JR Family</span>
         </h1>
         <p className="text-xs sm:text-sm text-slate-400">
-          One thread per employee. The Boss and that employee can read and write; colleagues have read-only access.
+          JR Family Group Chat plus direct messaging between every employee (GUZ, NOX, BSTURN, ANKY) and Boss (BOKA).
         </p>
       </div>
 
@@ -89,7 +85,8 @@ export function StaffThreadsClient({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         <div className="lg:col-span-4 space-y-2.5">
           {threads.map((t) => {
-            const isOwn = t.employeeId === callerId;
+            const isGroup = t.id === 'sthread-group';
+            const isBossThread = t.employeeId === 'boss-1';
             const active = selectedThread?.id === t.id;
             return (
               <Card
@@ -97,24 +94,38 @@ export function StaffThreadsClient({
                 onClick={() => router.push(`${basePath}?threadId=${t.id}`)}
                 className={cn(
                   'p-4 cursor-pointer transition space-y-1.5',
-                  active ? 'border-violet-500 bg-midnight-700/90' : 'hover:border-slate-700'
+                  active
+                    ? 'border-emerald-500 bg-midnight-700/90'
+                    : isGroup
+                      ? 'border-amber-500/40 bg-amber-950/15 hover:border-amber-400'
+                      : 'hover:border-slate-700'
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-bold text-white">
-                    {t.employeeName} ({t.employeeAlias})
+                  <span className="text-sm font-bold text-white flex items-center gap-1.5">
+                    {isGroup ? (
+                      <Users className="h-4 w-4 text-amber-300 shrink-0" aria-hidden="true" />
+                    ) : isBossThread ? (
+                      <Shield className="h-4 w-4 text-amber-300 shrink-0" aria-hidden="true" />
+                    ) : null}
+                    <span>
+                      {isGroup
+                        ? t.employeeName
+                        : isBossThread
+                          ? `${t.employeeName} (Boss)`
+                          : t.employeeName}
+                    </span>
                   </span>
-                  {callerRole === 'boss' || isOwn ? (
-                    <Badge tone="emerald">Read & Write</Badge>
+                  {isGroup ? (
+                    <Badge tone="amber">JR Family Group</Badge>
+                  ) : isBossThread ? (
+                    <Badge tone="amber">Boss (BOKA)</Badge>
                   ) : (
-                    <Badge tone="slate">
-                      <Eye className="h-3 w-3" aria-hidden="true" />
-                      <span>Read-Only</span>
-                    </Badge>
+                    <Badge tone="emerald">Message</Badge>
                   )}
                 </div>
                 <p className="text-xs text-slate-400 line-clamp-1">
-                  {t.lastMessagePreview ?? 'No messages yet'}
+                  {t.lastMessagePreview ?? 'Tap to message in JR Family'}
                 </p>
               </Card>
             );
@@ -123,58 +134,79 @@ export function StaffThreadsClient({
 
         <div className="lg:col-span-8">
           {selectedThread ? (
-            <Card className="flex flex-col h-[520px] overflow-hidden">
-              <div className="flex items-center justify-between border-b border-slate-800 bg-midnight-900 p-4">
+            <Card className="flex flex-col h-[540px] overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 bg-midnight-900 p-4">
                 <div>
-                  <h2 className="text-base font-bold text-white">
-                    Boss ↔ {selectedThread.employeeName} ({selectedThread.employeeAlias})
+                  <h2 className="text-base font-bold text-white flex items-center gap-2">
+                    {isGroupSelected ? (
+                      <>
+                        <Users className="h-4 w-4 text-amber-300" aria-hidden="true" />
+                        <span>JR Family Group Chat</span>
+                      </>
+                    ) : (
+                      <span>
+                        JR Family — {selectedThread.employeeName}
+                        {selectedThread.employeeId === 'boss-1' ? ' (Boss)' : ''}
+                      </span>
+                    )}
                   </h2>
                   <p className="text-xs text-slate-400">
-                    {canWriteThread
-                      ? 'You have Read & Write authority in this thread.'
-                      : "Colleague Thread: Read-Only View (Posting disabled by RLS & RPC)."}
+                    {isGroupSelected
+                      ? 'Shared group chat for BOKA (Boss), GUZ, NOX, BSTURN, and ANKY.'
+                      : `Every JR Family member (GUZ, NOX, BSTURN, ANKY, BOKA) can text ${selectedThread.employeeName} here.`}
                   </p>
                 </div>
-                <Badge tone={canWriteThread ? 'emerald' : 'amber'}>
-                  {canWriteThread ? 'WRITABLE' : 'READ-ONLY'}
+                <Badge tone="emerald">
+                  {isGroupSelected ? 'JR FAMILY GROUP' : 'DIRECT THREAD'}
                 </Badge>
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {messages.map((m) => {
-                  const isMine = m.senderId === callerId;
-                  return (
-                    <div
-                      key={m.id}
-                      className={cn(
-                        'flex flex-col max-w-[80%]',
-                        isMine ? 'ml-auto items-end' : 'mr-auto items-start'
-                      )}
-                    >
-                      <div className="flex items-center gap-2 mb-1 px-1">
-                        <span className="text-[11px] font-bold text-slate-300">
-                          {m.senderName}
-                        </span>
-                        <Badge tone={m.senderRole === 'boss' ? 'amber' : 'cyan'} className="text-[9px]">
-                          {m.senderRole.toUpperCase()}
-                        </Badge>
-                        <span className="text-[10px] font-mono text-slate-400">
-                          {formatISTTime(m.createdAt)}
-                        </span>
-                      </div>
+                {messages.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-10">
+                    No messages yet. Start the conversation below!
+                  </p>
+                ) : (
+                  messages.map((m) => {
+                    const isMine = m.senderId === callerId;
+                    return (
                       <div
+                        key={m.id}
                         className={cn(
-                          'rounded-2xl px-4 py-2.5 text-xs sm:text-sm',
-                          isMine
-                            ? 'bg-violet-600 text-white rounded-br-sm'
-                            : 'bg-midnight-950 border border-slate-800 text-slate-100 rounded-bl-sm'
+                          'flex flex-col max-w-[80%]',
+                          isMine ? 'ml-auto items-end' : 'mr-auto items-start'
                         )}
                       >
-                        {m.body}
+                        <div className="flex items-center gap-2 mb-1 px-1">
+                          <span className="text-[11px] font-bold text-slate-300">
+                            {m.senderName}
+                          </span>
+                          <Badge
+                            tone={m.senderRole === 'boss' ? 'amber' : 'cyan'}
+                            className="text-[9px]"
+                          >
+                            {m.senderRole === 'boss' ? 'BOKA (BOSS)' : m.senderName}
+                          </Badge>
+                          <span className="text-[10px] font-mono text-slate-400">
+                            {formatISTTime(m.createdAt)}
+                          </span>
+                        </div>
+                        <div
+                          className={cn(
+                            'rounded-2xl px-4 py-2.5 text-xs sm:text-sm',
+                            isMine
+                              ? 'bg-violet-600 text-white rounded-br-sm'
+                              : m.senderRole === 'boss'
+                                ? 'bg-amber-500/15 border border-amber-500/40 text-slate-100 rounded-bl-sm'
+                                : 'bg-midnight-950 border border-slate-800 text-slate-100 rounded-bl-sm'
+                          )}
+                        >
+                          {m.body}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
 
               {canWriteThread ? (
@@ -183,13 +215,15 @@ export function StaffThreadsClient({
                   className="flex items-center gap-2 border-t border-slate-800 bg-midnight-900 p-3"
                 >
                   <label htmlFor="staff-thread-input" className="sr-only">
-                    Message in private staff thread
+                    Message in JR Family
                   </label>
                   <Input
                     id="staff-thread-input"
-                    placeholder={`Message ${
-                      callerRole === 'boss' ? selectedThread.employeeName : 'Boss'
-                    }...`}
+                    placeholder={
+                      isGroupSelected
+                        ? 'Message everyone in JR Family Group Chat...'
+                        : `Message ${selectedThread.employeeName}...`
+                    }
                     value={body}
                     onChange={(e) => setBody(e.target.value)}
                   />
@@ -198,11 +232,7 @@ export function StaffThreadsClient({
                     <span>Send</span>
                   </Button>
                 </form>
-              ) : (
-                <div className="border-t border-slate-800 bg-midnight-950 p-3 text-center text-xs text-amber-300">
-                  Read-only colleague thread — you can read this thread for operational alignment, but only the Boss and {selectedThread.employeeName} can post messages here.
-                </div>
-              )}
+              ) : null}
             </Card>
           ) : null}
         </div>

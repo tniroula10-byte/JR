@@ -1,23 +1,28 @@
 import React from 'react';
 import { InviteUserFormClient } from '@/components/shared/invite-user-form';
+import { PendingCustomersQueueClient } from '@/components/shared/pending-customers-queue';
 import { requireActiveSession } from '@/lib/auth/session';
 import { getDataRepository } from '@/lib/data';
 
 export default async function EmployeeInviteCustomerPage() {
   const { caller } = await requireActiveSession(['employee', 'boss']);
   const repo = getDataRepository();
-  const invitations = await repo.listInvitations(caller);
+  const [invitations, pendingCustomers] = await Promise.all([
+    repo.listInvitations(caller),
+    repo.listPendingCustomers(caller)
+  ]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div>
         <h1 className="text-xl sm:text-2xl font-extrabold text-white">
-          Invite Customer (Employee Desk)
+          Customers & Pending Approvals (Employee Desk)
         </h1>
         <p className="text-xs sm:text-sm text-slate-400">
-          Employees can invite new customers only (never employees or a boss). Customers invited by an employee start unassigned and are visible to all staff.
+          Approve or reject pending customers before their first login, and invite new customers. Employee approval remains BOKA-only.
         </p>
       </div>
+      <PendingCustomersQueueClient pendingCustomers={pendingCustomers} />
       <InviteUserFormClient
         allowEmployeeInvite={false}
         recentInvitations={invitations}

@@ -1,10 +1,10 @@
 /**
  * Time & Timezone Utilities (`lib/time.ts`)
- * Decision 11: Times are stored in UTC and shown in Asia/Kolkata (IST).
+ * Times are stored in UTC and displayed in US Pacific / California Time (`America/Los_Angeles`, PT).
  */
 
-const istDateTimeFormatter = new Intl.DateTimeFormat('en-IN', {
-  timeZone: 'Asia/Kolkata',
+const usDateTimeFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles',
   day: '2-digit',
   month: 'short',
   year: 'numeric',
@@ -13,39 +13,74 @@ const istDateTimeFormatter = new Intl.DateTimeFormat('en-IN', {
   hour12: true
 });
 
-const istTimeOnlyFormatter = new Intl.DateTimeFormat('en-IN', {
-  timeZone: 'Asia/Kolkata',
+const usTimeOnlyFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles',
   hour: '2-digit',
   minute: '2-digit',
   hour12: true
 });
 
-const istDateOnlyFormatter = new Intl.DateTimeFormat('en-IN', {
-  timeZone: 'Asia/Kolkata',
+const usDateOnlyFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles',
   day: '2-digit',
   month: 'short',
   year: 'numeric'
+});
+
+const californiaDayKeyFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Los_Angeles',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit'
 });
 
 export function formatIST(isoOrDate: string | Date | null | undefined): string {
   if (!isoOrDate) return '—';
   const date = typeof isoOrDate === 'string' ? new Date(isoOrDate) : isoOrDate;
   if (Number.isNaN(date.getTime())) return '—';
-  return `${istDateTimeFormatter.format(date)} IST`;
+  return `${usDateTimeFormatter.format(date)} PT`;
 }
 
 export function formatISTTime(isoOrDate: string | Date | null | undefined): string {
   if (!isoOrDate) return '—';
   const date = typeof isoOrDate === 'string' ? new Date(isoOrDate) : isoOrDate;
   if (Number.isNaN(date.getTime())) return '—';
-  return istTimeOnlyFormatter.format(date);
+  return `${usTimeOnlyFormatter.format(date)} PT`;
 }
 
 export function formatISTDate(isoOrDate: string | Date | null | undefined): string {
   if (!isoOrDate) return '—';
   const date = typeof isoOrDate === 'string' ? new Date(isoOrDate) : isoOrDate;
   if (Number.isNaN(date.getTime())) return '—';
-  return istDateOnlyFormatter.format(date);
+  return usDateOnlyFormatter.format(date);
+}
+
+/**
+ * Returns the YYYY-MM-DD date key in California time (`America/Los_Angeles`).
+ * Resets at 12:00 AM California time.
+ */
+export function getCaliforniaDateKey(date: Date = new Date()): string {
+  return californiaDayKeyFormatter.format(date);
+}
+
+/**
+ * Returns seconds remaining until the next 12:00 AM midnight in California (`America/Los_Angeles`).
+ */
+export function getSecondsUntilCaliforniaMidnight(now: Date = new Date()): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    hour12: false
+  }).formatToParts(now);
+
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0') % 24;
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+  const second = Number(parts.find((p) => p.type === 'second')?.value ?? '0');
+
+  const elapsedSecondsToday = hour * 3600 + minute * 60 + second;
+  return Math.max(1, 86400 - elapsedSecondsToday);
 }
 
 export function formatDurationSeconds(seconds: number | null | undefined): string {

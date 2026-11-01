@@ -3,17 +3,17 @@
 @tailwind utilities;
 
 :root {
-  --bg-midnight: #070913;
-  --bg-surface: #0b0f1f;
-  --bg-card: #0f1424;
-  --bg-elevated: #161f36;
-  --accent-violet: #8b5cf6;
-  --accent-violet-hover: #7c3aed;
-  --accent-glow: rgba(139, 92, 246, 0.35);
+  --bg-midnight: #030604;
+  --bg-surface: #060c09;
+  --bg-card: #0a140f;
+  --bg-elevated: #0f1f17;
+  --accent-violet: #10b981;
+  --accent-violet-hover: #059669;
+  --accent-glow: rgba(16, 185, 129, 0.38);
   --text-primary: #f8fafc;
   --text-secondary: #94a3b8;
   --border-subtle: rgba(148, 163, 184, 0.14);
-  --border-violet: rgba(139, 92, 246, 0.32);
+  --border-violet: rgba(16, 185, 129, 0.35);
   color-scheme: dark;
 }
 
@@ -32,25 +32,25 @@ body {
 
 /* Accessible high-contrast keyboard focus ring */
 *:focus-visible {
-  outline: 2px solid #a78bfa;
+  outline: 2px solid #34d399;
   outline-offset: 2px;
 }
 
-/* Custom subtle dark scrollbar */
+/* Custom subtle dark luxury green scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #070913;
+  background: #030604;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e2946;
+  background: #162d22;
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #8b5cf6;
+  background: #10b981;
 }

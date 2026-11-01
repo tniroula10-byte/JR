@@ -10,8 +10,8 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Save, UserCheck, Ban, CheckCircle } from 'lucide-react';
-import { setUserStatusAction, updateStaffFlagsAction } from '@/actions';
+import { Save, UserCheck, Ban, CheckCircle, XCircle } from 'lucide-react';
+import { reviewPendingUserAction, setUserStatusAction, updateStaffFlagsAction } from '@/actions';
 import { Badge, Button, Card, Input } from '@/components/ui/primitives';
 import type { EmployeeWithFlags } from '@/lib/data/types';
 
@@ -96,6 +96,32 @@ export function BossEmployeesClient({
     }
   }
 
+  async function handleReviewPendingEmployee(
+    emp: EmployeeWithFlags,
+    decision: 'approve' | 'reject'
+  ) {
+    setBusyId(emp.id);
+    setFeedback(null);
+    try {
+      const res = await reviewPendingUserAction({
+        targetUserId: emp.id,
+        decision
+      });
+      if (!res.ok) {
+        setFeedback(res.error ?? 'Failed to review pending employee.');
+      } else {
+        setFeedback(
+          decision === 'approve'
+            ? `Employee ${emp.fullName} approved by BOKA and set to ACTIVE. Logged in audit_log.`
+            : `Employee ${emp.fullName} rejected by BOKA. Logged in audit_log.`
+        );
+        router.refresh();
+      }
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -123,31 +149,63 @@ export function BossEmployeesClient({
                 <div>
                   <div className="flex items-center gap-2">
                     <h2 className="text-base font-bold text-white">{emp.fullName}</h2>
-                    <Badge tone={emp.status === 'active' ? 'emerald' : 'rose'} className="uppercase">
-                      {emp.status}
+                    <Badge
+                      tone={
+                        emp.status === 'active'
+                          ? 'emerald'
+                          : emp.status === 'pending_approval'
+                            ? 'amber'
+                            : 'rose'
+                      }
+                      className="uppercase"
+                    >
+                      {emp.status.replace(/_/g, ' ')}
                     </Badge>
                   </div>
                   <p className="text-xs text-slate-400">{emp.email} • {emp.phone}</p>
                 </div>
 
-                <Button
-                  size="sm"
-                  variant={emp.status === 'active' ? 'danger' : 'emerald'}
-                  disabled={busyId === emp.id}
-                  onClick={() => handleToggleStatus(emp)}
-                >
-                  {emp.status === 'active' ? (
-                    <>
-                      <Ban className="h-3.5 w-3.5" aria-hidden="true" />
-                      <span>Suspend</span>
-                    </>
-                  ) : (
-                    <>
+                {emp.status === 'pending_approval' ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="emerald"
+                      disabled={busyId === emp.id}
+                      onClick={() => handleReviewPendingEmployee(emp, 'approve')}
+                    >
                       <CheckCircle className="h-3.5 w-3.5" aria-hidden="true" />
-                      <span>Activate</span>
-                    </>
-                  )}
-                </Button>
+                      <span>Approve (BOKA)</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={busyId === emp.id}
+                      onClick={() => handleReviewPendingEmployee(emp, 'reject')}
+                    >
+                      <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>Reject</span>
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant={emp.status === 'active' ? 'danger' : 'emerald'}
+                    disabled={busyId === emp.id}
+                    onClick={() => handleToggleStatus(emp)}
+                  >
+                    {emp.status === 'active' ? (
+                      <>
+                        <Ban className="h-3.5 w-3.5" aria-hidden="true" />
+                        <span>Suspend</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                        <span>Activate</span>
+                      </>
+                    )}
+                  </Button>
+                )}
               </div>
 
               <div>

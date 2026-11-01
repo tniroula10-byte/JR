@@ -72,7 +72,7 @@ export function CustomerOffersClient({ offers }: { offers: Offer[] }) {
           </p>
         </div>
         <Link
-          href="/products"
+          href="/home#catalog-section"
           className="inline-flex h-9 items-center gap-2 rounded-xl bg-violet-600 px-3.5 text-xs font-semibold text-white shadow-violet-glow hover:bg-violet-500"
         >
           <Coins className="h-3.5 w-3.5" aria-hidden="true" />
@@ -110,7 +110,7 @@ export function CustomerOffersClient({ offers }: { offers: Offer[] }) {
                   className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-300 hover:underline"
                 >
                   <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span>Discuss in Support Chat</span>
+                  <span>Discuss in Chat</span>
                 </Link>
               </div>
 

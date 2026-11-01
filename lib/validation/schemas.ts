@@ -24,7 +24,9 @@ export const InviteUserSchema = z.object({
   fullName: z.string().trim().min(2, 'Full name must be at least 2 characters').max(80),
   phone: E164PhoneSchema.optional().or(z.literal('')),
   intendedRole: z.enum(['customer', 'employee']),
-  publicAlias: z.string().trim().min(2).max(40).optional()
+  publicAlias: z.string().trim().min(2).max(40).optional(),
+  username: z.string().trim().min(2).max(40).optional(),
+  initialPassword: z.string().trim().min(2).max(128).optional()
 });
 
 export const UpdateCustomerProfileSchema = z.object({
@@ -32,6 +34,48 @@ export const UpdateCustomerProfileSchema = z.object({
   email: EmailSchema,
   phone: E164PhoneSchema
 });
+
+export const BASIC_PASSWORD_RULE_TEXT =
+  'Password must be at least 8 characters and include at least one uppercase letter, one lowercase letter, one number, and one special character (e.g. Abcd123@).';
+
+export function validateBasicPasswordFormat(password: string): {
+  valid: boolean;
+  error?: string;
+} {
+  if (
+    !password ||
+    password.length < 8 ||
+    !/[A-Z]/.test(password) ||
+    !/[a-z]/.test(password) ||
+    !/[0-9]/.test(password) ||
+    !/[^A-Za-z0-9]/.test(password)
+  ) {
+    return {
+      valid: false,
+      error: `INVALID_PASSWORD: ${BASIC_PASSWORD_RULE_TEXT}`
+    };
+  }
+  return { valid: true };
+}
+
+export const BasicPasswordSchema = z
+  .string()
+  .min(8, BASIC_PASSWORD_RULE_TEXT)
+  .max(128, 'Password is too long')
+  .refine((val) => validateBasicPasswordFormat(val).valid, {
+    message: BASIC_PASSWORD_RULE_TEXT
+  });
+
+export const ChangeCustomerPasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Current password is required'),
+    newPassword: BasicPasswordSchema,
+    confirmPassword: z.string().min(1, 'Please confirm your new password')
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: 'New password and confirmation do not match',
+    path: ['confirmPassword']
+  });
 
 export const SubmitOfferSchema = z.object({
   productId: z.string().min(1, 'Product ID is required'),

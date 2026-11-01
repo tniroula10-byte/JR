@@ -5,19 +5,32 @@
  * Used by both Employee (`/employee/tickets`) and Boss (`/boss/tickets`).
  * - Boss can assign/reassign any ticket and reply/transition any ticket.
  * - Employee can reply and transition ONLY tickets assigned to them; other employees' tickets
- *   are strictly read-only (Decision 6 & Section 7 Permission Matrix).
+ *   are strictly read-only.
+ * - When a customer raises a support ticket against a specific employee, a private 3-member
+ *   Complaint Chat room is automatically created with exactly three members:
+ *   Main Admin (Boss), that Employee, and the Customer.
  */
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Eye, Lock, Send, UserCheck } from 'lucide-react';
+import {
+  Eye,
+  Lock,
+  Send,
+  ShieldAlert,
+  UserCheck,
+  Users
+} from 'lucide-react';
 import {
   assignTicketAction,
   replyTicketAction,
+  sendComplaintChatMessageAction,
   transitionTicketAction
 } from '@/actions';
 import { Badge, Button, Card, EmptyState, Input } from '@/components/ui/primitives';
 import type {
+  ComplaintChatMessage,
+  ComplaintChatRoom,
   EmployeeWithFlags,
   StaffTicketMessageView,
   Ticket,
@@ -36,6 +49,8 @@ export function StaffTicketsClient({
   selectedTicket,
   messages,
   events,
+  complaintRoom = null,
+  complaintMessages = [],
   employees
 }: {
   basePath: '/employee/tickets' | '/boss/tickets';
@@ -45,6 +60,8 @@ export function StaffTicketsClient({
   selectedTicket: Ticket | null;
   messages: StaffTicketMessageView[];
   events: TicketEvent[];
+  complaintRoom?: ComplaintChatRoom | null;
+  complaintMessages?: ComplaintChatMessage[];
   employees: EmployeeWithFlags[];
 }) {
   const router = useRouter();
@@ -52,6 +69,7 @@ export function StaffTicketsClient({
     callerRole === 'employee' ? 'mine' : 'all'
   );
   const [replyBody, setReplyBody] = useState('');
+  const [complaintReplyBody, setComplaintReplyBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -110,6 +128,27 @@ export function StaffTicketsClient({
     }
   }
 
+  async function handleSendComplaintMessage(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedTicket || !complaintReplyBody.trim()) return;
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const res = await sendComplaintChatMessageAction({
+        ticketId: selectedTicket.id,
+        body: complaintReplyBody.trim()
+      });
+      if (!res.ok) {
+        setFeedback(res.error ?? 'Could not send message to 3-member complaint room.');
+      } else {
+        setComplaintReplyBody('');
+        router.refresh();
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleStatusTransition(toStatus: TicketStatus) {
     if (!selectedTicket) return;
     setBusy(true);
@@ -139,7 +178,7 @@ export function StaffTicketsClient({
               : 'Support Tickets (Assigned & Colleague Read-Only)'}
           </h1>
           <p className="text-xs sm:text-sm text-slate-400">
-            Strict status machine enforced. Only the assigned employee or the Boss can reply or change status.
+            Tickets raised against a specific employee automatically include a private 3-member Complaint Chat room (Main Admin, that Employee, and Customer).
           </p>
         </div>
 
@@ -190,9 +229,14 @@ export function StaffTicketsClient({
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-xs font-bold text-violet-300">
-                      TKT-{t.ticketNo}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-violet-300">
+                        TKT-{t.ticketNo}
+                      </span>
+                      {t.requestedEmployeeId ? (
+                        <Badge tone="amber">3-Member Complaint Room</Badge>
+                      ) : null}
+                    </div>
                     <Badge
                       tone={
                         t.status === 'resolved'
@@ -222,149 +266,246 @@ export function StaffTicketsClient({
         </div>
 
         {/* Right Ticket Thread & Controls */}
-        <div className="lg:col-span-7">
+        <div className="lg:col-span-7 space-y-5">
           {selectedTicket ? (
-            <Card className="p-5 space-y-4">
-              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800 pb-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold text-violet-300">
-                      TKT-{selectedTicket.ticketNo}
-                    </span>
-                    <Badge tone="cyan" className="uppercase">
-                      {selectedTicket.status.replace(/_/g, ' ')}
-                    </Badge>
-                    <Badge tone="slate">Priority: {selectedTicket.priority.toUpperCase()}</Badge>
+            <>
+              {/* Private 3-Member Complaint Chat Room (visible ONLY to Boss, that Employee, and Customer) */}
+              {complaintRoom ? (
+                <Card className="p-5 space-y-4 border-amber-500/45 bg-gradient-to-br from-amber-950/25 via-midnight-900 to-midnight-950">
+                  <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800 pb-3.5">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <ShieldAlert className="h-4 w-4 text-amber-400" aria-hidden="true" />
+                        <span className="text-xs font-extrabold uppercase tracking-wider text-amber-300">
+                          Private 3-Member Complaint Chat Room
+                        </span>
+                        <Badge tone="amber">
+                          <Lock className="h-3 w-3" aria-hidden="true" />
+                          <span>Exactly 3 Members</span>
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-300">
+                        Automatically created when {complaintRoom.customerName} raised TKT-{selectedTicket.ticketNo} against {complaintRoom.employeeName} ({complaintRoom.employeeAlias}).
+                      </p>
+                    </div>
                   </div>
-                  <h2 className="mt-1 text-base font-bold text-white">{selectedTicket.subject}</h2>
-                  <p className="text-xs text-slate-400">
-                    Customer: {selectedTicket.customerName} • Assigned:{' '}
-                    <strong className="text-violet-300">
-                      {selectedTicket.assignedEmployeeName ?? 'Unassigned'}
-                    </strong>
-                  </p>
+
+                  {/* Exact 3 Members Strip */}
+                  <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-800 bg-midnight-950/90 p-3">
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-400 mr-1">
+                      <Users className="h-3.5 w-3.5 text-amber-300" aria-hidden="true" />
+                      Members (3):
+                    </span>
+                    <Badge tone="amber">1. Main Admin: {complaintRoom.bossName}</Badge>
+                    <Badge tone="cyan">
+                      2. Employee: {complaintRoom.employeeName} ({complaintRoom.employeeAlias})
+                    </Badge>
+                    <Badge tone="violet">3. Customer: {complaintRoom.customerName}</Badge>
+                  </div>
+
+                  {/* Complaint Room Messages */}
+                  <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                    {complaintMessages.map((cm) => {
+                      const isMine = cm.senderId === callerId;
+                      return (
+                        <div
+                          key={cm.id}
+                          className={`rounded-xl p-3 text-xs ${
+                            isMine
+                              ? 'bg-violet-600/20 border border-violet-500/40 text-slate-100'
+                              : cm.senderRole === 'boss'
+                                ? 'bg-amber-500/15 border border-amber-500/40 text-slate-100'
+                                : 'bg-midnight-950 border border-slate-800 text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-bold text-amber-200">
+                              {cm.senderDisplayName}
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-400">
+                              {formatIST(cm.createdAt)}
+                            </span>
+                          </div>
+                          <p className="leading-relaxed">{cm.body}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {selectedTicket.status !== 'closed' ? (
+                    <form onSubmit={handleSendComplaintMessage} className="flex gap-2">
+                      <label htmlFor="staff-complaint-room-input" className="sr-only">
+                        Send message in 3-member complaint room
+                      </label>
+                      <Input
+                        id="staff-complaint-room-input"
+                        placeholder="Message in private 3-member Complaint Chat room..."
+                        value={complaintReplyBody}
+                        onChange={(e) => setComplaintReplyBody(e.target.value)}
+                      />
+                      <Button
+                        type="submit"
+                        disabled={busy || !complaintReplyBody.trim()}
+                      >
+                        <Send className="h-4 w-4" aria-hidden="true" />
+                        <span>Send</span>
+                      </Button>
+                    </form>
+                  ) : null}
+                </Card>
+              ) : selectedTicket.requestedEmployeeId &&
+                callerRole === 'employee' &&
+                selectedTicket.requestedEmployeeId !== callerId ? (
+                <Card className="p-4 border-amber-500/35 bg-amber-500/10 flex items-center gap-2.5 text-xs text-amber-200">
+                  <Lock className="h-4 w-4 shrink-0 text-amber-300" aria-hidden="true" />
+                  <span>
+                    Private 3-Member Complaint Room Restricted: Only the Main Admin (Boss), the specified employee ({selectedTicket.assignedEmployeeName}), and the customer have access to the complaint chat room on this ticket.
+                  </span>
+                </Card>
+              ) : null}
+
+              <Card className="p-5 space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800 pb-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-violet-300">
+                        TKT-{selectedTicket.ticketNo}
+                      </span>
+                      <Badge tone="cyan" className="uppercase">
+                        {selectedTicket.status.replace(/_/g, ' ')}
+                      </Badge>
+                      <Badge tone="slate">Priority: {selectedTicket.priority.toUpperCase()}</Badge>
+                    </div>
+                    <h2 className="mt-1 text-base font-bold text-white">{selectedTicket.subject}</h2>
+                    <p className="text-xs text-slate-400">
+                      Customer: {selectedTicket.customerName} • Assigned:{' '}
+                      <strong className="text-violet-300">
+                        {selectedTicket.assignedEmployeeName ?? 'Unassigned'}
+                      </strong>
+                    </p>
+                  </div>
+
+                  {/* Boss Assignment Dropdown */}
+                  {callerRole === 'boss' && selectedTicket.status !== 'closed' ? (
+                    <div className="flex items-center gap-2">
+                      <label htmlFor="boss-ticket-assign" className="text-xs text-slate-300">
+                        Assign:
+                      </label>
+                      <select
+                        id="boss-ticket-assign"
+                        disabled={busy}
+                        value={selectedTicket.assignedEmployeeId ?? ''}
+                        onChange={(e) => handleAssign(e.target.value)}
+                        className="h-9 rounded-xl bg-midnight-950 border border-violet-500/40 px-2.5 text-xs text-slate-100"
+                      >
+                        <option value="">Select employee...</option>
+                        {employees.map((emp) => (
+                          <option key={emp.id} value={emp.id}>
+                            {emp.fullName} ({emp.staffProfile.publicAlias})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
                 </div>
 
-                {/* Boss Assignment Dropdown */}
-                {callerRole === 'boss' && selectedTicket.status !== 'closed' ? (
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="boss-ticket-assign" className="text-xs text-slate-300">
-                      Assign:
-                    </label>
-                    <select
-                      id="boss-ticket-assign"
-                      disabled={busy}
-                      value={selectedTicket.assignedEmployeeId ?? ''}
-                      onChange={(e) => handleAssign(e.target.value)}
-                      className="h-9 rounded-xl bg-midnight-950 border border-violet-500/40 px-2.5 text-xs text-slate-100"
-                    >
-                      <option value="">Select employee...</option>
-                      {employees.map((emp) => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.fullName} ({emp.staffProfile.publicAlias})
-                        </option>
-                      ))}
-                    </select>
+                {/* Status Machine Transition Controls */}
+                {canWriteSelected && allowedTransitions.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-2 rounded-xl bg-midnight-950/80 p-3 border border-slate-800">
+                    <span className="text-xs font-medium text-slate-300 mr-1">
+                      Transition Status:
+                    </span>
+                    {allowedTransitions.map((nextSt) => (
+                      <Button
+                        key={nextSt}
+                        size="sm"
+                        variant={nextSt === 'resolved' ? 'emerald' : 'secondary'}
+                        disabled={busy}
+                        onClick={() => handleStatusTransition(nextSt)}
+                      >
+                        → {nextSt.replace(/_/g, ' ').toUpperCase()}
+                      </Button>
+                    ))}
                   </div>
                 ) : null}
-              </div>
 
-              {/* Status Machine Transition Controls */}
-              {canWriteSelected && allowedTransitions.length > 0 ? (
-                <div className="flex flex-wrap items-center gap-2 rounded-xl bg-midnight-950/80 p-3 border border-slate-800">
-                  <span className="text-xs font-medium text-slate-300 mr-1">
-                    Transition Status:
-                  </span>
-                  {allowedTransitions.map((nextSt) => (
-                    <Button
-                      key={nextSt}
-                      size="sm"
-                      variant={nextSt === 'resolved' ? 'emerald' : 'secondary'}
-                      disabled={busy}
-                      onClick={() => handleStatusTransition(nextSt)}
+                {!canWriteSelected ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-amber-500/35 bg-amber-500/10 p-3 text-xs text-amber-200">
+                    <Lock className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span>
+                      Read-Only Mode: Only the assigned specialist (
+                      {selectedTicket.assignedEmployeeName ?? 'Unassigned'}) or the Boss can reply or transition this ticket.
+                    </span>
+                  </div>
+                ) : null}
+
+                {/* Ticket Messages with Staff Attribution */}
+                <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                  {messages.map((m) => (
+                    <div
+                      key={m.id}
+                      className={`rounded-xl p-3.5 text-xs ${
+                        m.senderKind === 'staff'
+                          ? 'bg-violet-600/20 border border-violet-500/35 text-slate-100'
+                          : 'bg-midnight-950 border border-slate-800 text-slate-200'
+                      }`}
                     >
-                      → {nextSt.replace(/_/g, ' ').toUpperCase()}
-                    </Button>
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-violet-300">{m.senderDisplayName}</span>
+                          {m.senderKind === 'staff' && m.attributedStaffName ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-cyan-500/15 border border-cyan-500/35 px-2 py-0.5 text-[10px] text-cyan-200">
+                              <UserCheck className="h-3 w-3" aria-hidden="true" />
+                              {m.attributedStaffName} ({m.attributedStaffAlias})
+                            </span>
+                          ) : null}
+                        </div>
+                        <span className="text-[11px] text-slate-400">{formatIST(m.createdAt)}</span>
+                      </div>
+                      <p>{m.body}</p>
+                    </div>
                   ))}
                 </div>
-              ) : null}
 
-              {!canWriteSelected ? (
-                <div className="flex items-center gap-2 rounded-xl border border-amber-500/35 bg-amber-500/10 p-3 text-xs text-amber-200">
-                  <Lock className="h-4 w-4 shrink-0" aria-hidden="true" />
-                  <span>
-                    Read-Only Mode: Only the assigned specialist (
-                    {selectedTicket.assignedEmployeeName ?? 'Unassigned'}) or the Boss can reply or transition this ticket.
-                  </span>
-                </div>
-              ) : null}
+                {/* Reply Input */}
+                {canWriteSelected && selectedTicket.status !== 'closed' ? (
+                  <form onSubmit={handleReply} className="flex gap-2">
+                    <label htmlFor="staff-ticket-reply" className="sr-only">
+                      Reply to ticket
+                    </label>
+                    <Input
+                      id="staff-ticket-reply"
+                      placeholder="Send ticket reply as John Rambo Support..."
+                      value={replyBody}
+                      onChange={(e) => setReplyBody(e.target.value)}
+                    />
+                    <Button type="submit" disabled={busy || !replyBody.trim()}>
+                      <Send className="h-4 w-4" aria-hidden="true" />
+                      <span>Reply</span>
+                    </Button>
+                  </form>
+                ) : null}
 
-              {/* Ticket Messages with Staff Attribution */}
-              <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
-                {messages.map((m) => (
-                  <div
-                    key={m.id}
-                    className={`rounded-xl p-3.5 text-xs ${
-                      m.senderKind === 'staff'
-                        ? 'bg-violet-600/20 border border-violet-500/35 text-slate-100'
-                        : 'bg-midnight-950 border border-slate-800 text-slate-200'
-                    }`}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-violet-300">{m.senderDisplayName}</span>
-                        {m.senderKind === 'staff' && m.attributedStaffName ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-cyan-500/15 border border-cyan-500/35 px-2 py-0.5 text-[10px] text-cyan-200">
-                            <UserCheck className="h-3 w-3" aria-hidden="true" />
-                            {m.attributedStaffName} ({m.attributedStaffAlias})
-                          </span>
-                        ) : null}
-                      </div>
-                      <span className="text-[11px] text-slate-400">{formatIST(m.createdAt)}</span>
+                {/* Append-Only Event Trail */}
+                <div className="border-t border-slate-800 pt-3 space-y-1.5">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    Append-Only Ticket Event Ledger ({events.length})
+                  </p>
+                  {events.map((ev) => (
+                    <div
+                      key={ev.id}
+                      className="flex items-center justify-between text-[11px] text-slate-300 bg-midnight-950/60 px-3 py-1.5 rounded-lg"
+                    >
+                      <span>
+                        <strong>{ev.event.toUpperCase()}</strong> ({ev.fromValue ?? 'init'} →{' '}
+                        {ev.toValue ?? '—'})
+                      </span>
+                      <span className="font-mono text-slate-400">{formatIST(ev.createdAt)}</span>
                     </div>
-                    <p>{m.body}</p>
-                  </div>
-                ))}
-              </div>
-
-              {/* Reply Input */}
-              {canWriteSelected && selectedTicket.status !== 'closed' ? (
-                <form onSubmit={handleReply} className="flex gap-2">
-                  <label htmlFor="staff-ticket-reply" className="sr-only">
-                    Reply to ticket
-                  </label>
-                  <Input
-                    id="staff-ticket-reply"
-                    placeholder="Send ticket reply as John Rambo Support..."
-                    value={replyBody}
-                    onChange={(e) => setReplyBody(e.target.value)}
-                  />
-                  <Button type="submit" disabled={busy || !replyBody.trim()}>
-                    <Send className="h-4 w-4" aria-hidden="true" />
-                    <span>Reply</span>
-                  </Button>
-                </form>
-              ) : null}
-
-              {/* Append-Only Event Trail */}
-              <div className="border-t border-slate-800 pt-3 space-y-1.5">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  Append-Only Ticket Event Ledger ({events.length})
-                </p>
-                {events.map((ev) => (
-                  <div
-                    key={ev.id}
-                    className="flex items-center justify-between text-[11px] text-slate-300 bg-midnight-950/60 px-3 py-1.5 rounded-lg"
-                  >
-                    <span>
-                      <strong>{ev.event.toUpperCase()}</strong> ({ev.fromValue ?? 'init'} →{' '}
-                      {ev.toValue ?? '—'})
-                    </span>
-                    <span className="font-mono text-slate-400">{formatIST(ev.createdAt)}</span>
-                  </div>
-                ))}
-              </div>
-            </Card>
+                  ))}
+                </div>
+              </Card>
+            </>
           ) : null}
         </div>
       </div>

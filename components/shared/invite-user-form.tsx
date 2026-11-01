@@ -1,12 +1,10 @@
 'use client';
 
 /**
- * Shared Invitation Form (`components/shared/invite-user-form.tsx`)
- * Decision 3:
- * - Boss can invite customers and employees.
+ * Shared Invitation & Staff Account Creation Form (`components/shared/invite-user-form.tsx`)
+ * - Boss can create/invite customers and employees.
+ * - For employees: First-time login does NOT use email OTP; Boss sets their Username and Password directly.
  * - Employees can invite customers only (never employees or a boss).
- * - Every invite goes through one server-side function (`inviteUserAction`) that checks
- *   caller role, records `invited_by`, `invitations` row, `audit_log` entry, and sends magic link.
  */
 
 import React, { useState } from 'react';
@@ -27,9 +25,11 @@ export function InviteUserFormClient({
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('+919811100099');
+  const [phone, setPhone] = useState('+14155550199');
   const [intendedRole, setIntendedRole] = useState<'customer' | 'employee'>('customer');
   const [publicAlias, setPublicAlias] = useState('');
+  const [username, setUsername] = useState('');
+  const [initialPassword, setInitialPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -40,24 +40,31 @@ export function InviteUserFormClient({
     setErrorMsg(null);
     setSuccessMsg(null);
     try {
+      const roleToUse = allowEmployeeInvite ? intendedRole : 'customer';
       const res = await inviteUserAction({
         email,
         fullName,
         phone,
-        intendedRole: allowEmployeeInvite ? intendedRole : 'customer',
-        publicAlias: intendedRole === 'employee' ? publicAlias : undefined
+        intendedRole: roleToUse,
+        publicAlias: roleToUse === 'employee' ? publicAlias || fullName : undefined,
+        username: username.trim() || undefined,
+        initialPassword: initialPassword.trim() || undefined
       });
       if (!res.ok) {
-        setErrorMsg(res.error ?? 'Failed to send invitation.');
+        setErrorMsg(res.error ?? 'Failed to create/invite user.');
       } else {
         setSuccessMsg(
-          `Invitation dispatched to ${email} (${
-            allowEmployeeInvite ? intendedRole : 'customer'
-          }). Recorded in invitations, activity_events, and audit_log.`
+          roleToUse === 'employee'
+            ? `Employee account created for ${fullName} (Username: ${
+                username || fullName
+              }) with password set by BOKA.`
+            : `Invitation dispatched to ${email} (Customer).`
         );
         setEmail('');
         setFullName('');
         setPublicAlias('');
+        setUsername('');
+        setInitialPassword('');
         router.refresh();
       }
     } finally {
@@ -73,7 +80,7 @@ export function InviteUserFormClient({
             <UserPlus className="h-4 w-4 text-violet-400" aria-hidden="true" />
             <span>
               {allowEmployeeInvite
-                ? 'Send Magic-Link Invitation (Customer or Employee)'
+                ? 'Add Employee (Set Password) or Invite Customer'
                 : 'Invite New Customer to John Rambo'}
             </span>
           </h2>
@@ -99,12 +106,12 @@ export function InviteUserFormClient({
         <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="inv-name" className="block text-xs font-medium text-slate-300 mb-1">
-              Full Name
+              Full Name / Display Name
             </label>
             <Input
               id="inv-name"
               required
-              placeholder="e.g. Rohan Malhotra"
+              placeholder="e.g. GUZ or Member Name"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
             />
@@ -118,7 +125,7 @@ export function InviteUserFormClient({
               id="inv-email"
               type="email"
               required
-              placeholder="trader@gamer.in"
+              placeholder="user@johnrambo.us"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
@@ -126,11 +133,11 @@ export function InviteUserFormClient({
 
           <div>
             <label htmlFor="inv-phone" className="block text-xs font-medium text-slate-300 mb-1">
-              Phone (E.164 Format)
+              Phone (US E.164 Format)
             </label>
             <Input
               id="inv-phone"
-              placeholder="+919811100099"
+              placeholder="+14155550199"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
             />
@@ -148,29 +155,65 @@ export function InviteUserFormClient({
                 className="w-full h-10 rounded-xl bg-midnight-950 border border-slate-700 px-3 text-xs text-slate-100"
               >
                 <option value="customer">Customer</option>
-                <option value="employee">Employee (Staff Specialist)</option>
+                <option value="employee">Employee (Password set by Boss)</option>
               </select>
             </div>
           ) : null}
 
           {allowEmployeeInvite && intendedRole === 'employee' ? (
-            <div className="sm:col-span-2">
-              <label htmlFor="inv-alias" className="block text-xs font-medium text-violet-300 mb-1">
-                Staff Public Alias (Shown when customer selection is enabled)
-              </label>
-              <Input
-                id="inv-alias"
-                placeholder="e.g. Sentinel"
-                value={publicAlias}
-                onChange={(e) => setPublicAlias(e.target.value)}
-              />
-            </div>
+            <>
+              <div>
+                <label htmlFor="inv-username" className="block text-xs font-medium text-violet-300 mb-1">
+                  Employee Username
+                </label>
+                <Input
+                  id="inv-username"
+                  required
+                  placeholder="e.g. GUZ"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="inv-password" className="block text-xs font-medium text-violet-300 mb-1">
+                  Employee Password (8+ chars: Upper, Lower, Number & Symbol)
+                </label>
+                <Input
+                  id="inv-password"
+                  type="password"
+                  required
+                  minLength={8}
+                  placeholder="e.g. Abcd123@"
+                  value={initialPassword}
+                  onChange={(e) => setInitialPassword(e.target.value)}
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label htmlFor="inv-alias" className="block text-xs font-medium text-slate-300 mb-1">
+                  Staff Public Alias (Optional)
+                </label>
+                <Input
+                  id="inv-alias"
+                  placeholder="e.g. GUZ"
+                  value={publicAlias}
+                  onChange={(e) => setPublicAlias(e.target.value)}
+                />
+              </div>
+            </>
           ) : null}
 
           <div className="sm:col-span-2">
             <Button type="submit" disabled={submitting}>
               <UserPlus className="h-4 w-4" aria-hidden="true" />
-              <span>{submitting ? 'Dispatching Invite...' : 'Send Magic-Link Invite'}</span>
+              <span>
+                {submitting
+                  ? 'Saving...'
+                  : allowEmployeeInvite && intendedRole === 'employee'
+                    ? 'Create Employee & Set Password'
+                    : 'Send Customer Invite'}
+              </span>
             </Button>
           </div>
         </form>

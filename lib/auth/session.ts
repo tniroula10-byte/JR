@@ -22,8 +22,8 @@ export async function getCurrentProfile(): Promise<Profile | null> {
   }
 
   const cookieStore = await cookies();
-  const mockUserId = cookieStore.get(MOCK_SESSION_COOKIE)?.value ?? 'cust-1';
-  if (mockUserId === 'anon' || mockUserId === 'none') {
+  const mockUserId = cookieStore.get(MOCK_SESSION_COOKIE)?.value;
+  if (!mockUserId || mockUserId === 'anon' || mockUserId === 'none') {
     return null;
   }
   return repo.getProfileById(mockUserId);
@@ -36,6 +36,12 @@ export async function requireActiveSession(allowedRoles?: Array<'boss' | 'employ
   const profile = await getCurrentProfile();
   if (!profile) {
     redirect('/login');
+  }
+  if (profile.status === 'pending_approval' || profile.status === 'invited') {
+    redirect('/login?error=pending_approval');
+  }
+  if (profile.status === 'rejected') {
+    redirect('/login?error=account_rejected');
   }
   if (profile.status !== 'active') {
     redirect('/login?error=account_suspended');

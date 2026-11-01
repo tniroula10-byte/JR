@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Ban, CheckCircle, Users } from 'lucide-react';
 import { setUserStatusAction } from '@/actions';
 import { InviteUserFormClient } from '@/components/shared/invite-user-form';
+import { PendingCustomersQueueClient } from '@/components/shared/pending-customers-queue';
 import { Badge, Button, Card } from '@/components/ui/primitives';
 import type { Invitation, Profile } from '@/lib/data/types';
 import { formatIST } from '@/lib/time';
@@ -41,6 +42,8 @@ export function BossCustomersClient({
     }
   }
 
+  const pendingCustomers = customers.filter((c) => c.status === 'pending_approval');
+
   return (
     <div className="space-y-6">
       <div>
@@ -49,7 +52,7 @@ export function BossCustomersClient({
           <span>Customer Management ({customers.length} Accounts)</span>
         </h1>
         <p className="text-xs sm:text-sm text-slate-400">
-          Invite new customers or employees, inspect who invited each customer, and suspend or reactivate accounts.
+          Approve or reject pending customers before their first login, invite new accounts, and suspend or reactivate approved customers.
         </p>
       </div>
 
@@ -58,6 +61,11 @@ export function BossCustomersClient({
           {feedback}
         </div>
       ) : null}
+
+      <PendingCustomersQueueClient
+        pendingCustomers={pendingCustomers}
+        staffLookup={staffLookup}
+      />
 
       <InviteUserFormClient
         allowEmployeeInvite={true}
@@ -91,34 +99,44 @@ export function BossCustomersClient({
                   </td>
                   <td className="py-3 px-3">
                     <Badge
-                      tone={c.status === 'active' ? 'emerald' : 'rose'}
+                      tone={
+                        c.status === 'active'
+                          ? 'emerald'
+                          : c.status === 'pending_approval'
+                            ? 'amber'
+                            : 'rose'
+                      }
                       className="uppercase"
                     >
-                      {c.status}
+                      {c.status.replace(/_/g, ' ')}
                     </Badge>
                   </td>
                   <td className="py-3 px-3 font-mono text-[11px] text-slate-400">
                     {formatIST(c.createdAt)}
                   </td>
                   <td className="py-3 pl-3 text-right">
-                    <Button
-                      size="sm"
-                      variant={c.status === 'active' ? 'danger' : 'emerald'}
-                      disabled={busyId === c.id}
-                      onClick={() => handleStatusToggle(c)}
-                    >
-                      {c.status === 'active' ? (
-                        <>
-                          <Ban className="h-3.5 w-3.5" aria-hidden="true" />
-                          <span>Suspend</span>
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle className="h-3.5 w-3.5" aria-hidden="true" />
-                          <span>Activate</span>
-                        </>
-                      )}
-                    </Button>
+                    {c.status === 'pending_approval' ? (
+                      <span className="text-[11px] text-amber-300">Use Approval Queue above</span>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant={c.status === 'active' ? 'danger' : 'emerald'}
+                        disabled={busyId === c.id}
+                        onClick={() => handleStatusToggle(c)}
+                      >
+                        {c.status === 'active' ? (
+                          <>
+                            <Ban className="h-3.5 w-3.5" aria-hidden="true" />
+                            <span>Suspend</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                            <span>Activate</span>
+                          </>
+                        )}
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}

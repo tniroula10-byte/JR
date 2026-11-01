@@ -3,18 +3,18 @@ import Link from 'next/link';
 import {
   Activity,
   ArrowRight,
-  Coins,
   Inbox,
   Lock,
   Megaphone,
   Ticket as TicketIcon,
   UserPlus
 } from 'lucide-react';
+import { EmployeeBossPopupModal } from '@/components/shared/employee-boss-popup';
+import { PendingCustomersQueueClient } from '@/components/shared/pending-customers-queue';
 import { Badge, Card } from '@/components/ui/primitives';
 import { requireActiveSession } from '@/lib/auth/session';
 import { getDataRepository } from '@/lib/data';
-import { formatPaiseToINR } from '@/lib/money';
-import { formatDurationSeconds, formatIST } from '@/lib/time';
+import { formatDurationSeconds } from '@/lib/time';
 
 export default async function EmployeeDashboardPage() {
   const { profile, caller } = await requireActiveSession(['employee', 'boss']);
@@ -24,16 +24,25 @@ export default async function EmployeeDashboardPage() {
     settings,
     conversations,
     tickets,
-    offers,
     staffAnnouncements,
-    perfMetrics
+    staffThreads,
+    perfMetrics,
+    pendingCustomers
   ] = await Promise.all([
     repo.getAppSettings(caller),
     repo.listConversations(caller),
     repo.listTickets(caller),
-    repo.listOffers(caller),
     repo.listStaffAnnouncements(caller),
-    repo.getEmployeePerformance(caller, { employeeId: profile.id })
+    repo.listStaffThreads(caller),
+    repo.getEmployeePerformance(caller, { employeeId: profile.id }),
+    repo.listPendingCustomers(caller)
+  ]);
+
+  const myThread =
+    staffThreads.find((t) => t.employeeId === profile.id) ?? staffThreads[0] ?? null;
+  const [bossThreadMessages, groupThreadMessages] = await Promise.all([
+    myThread ? repo.listStaffThreadMessages(caller, myThread.id) : Promise.resolve([]),
+    repo.listStaffThreadMessages(caller, 'sthread-group')
   ]);
 
   const myPerf = perfMetrics[0];
@@ -41,7 +50,6 @@ export default async function EmployeeDashboardPage() {
   const myAssignedTickets = tickets.filter(
     (t) => t.assignedEmployeeId === profile.id && t.status !== 'closed'
   );
-  const pendingOffers = offers.filter((o) => o.status === 'pending');
   const unackedAnnouncements = staffAnnouncements.filter(
     (a) => !a.acks.some((ack) => ack.employeeId === profile.id)
   );
@@ -60,12 +68,17 @@ export default async function EmployeeDashboardPage() {
             <h1 className="mt-2 text-xl sm:text-2xl font-extrabold text-white">
               {profile.fullName} — Specialist Desk
             </h1>
-            <p className="mt-1 text-xs sm:text-sm text-slate-300">
-              All customer replies are sent under the shared identity{' '}
-              <strong className="text-violet-300">John Rambo Support</strong> while internal attribution is logged.
-            </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            {/* Boss Announcements / Boss Thread Pop-up Modal (auto-opens on login) */}
+            <EmployeeBossPopupModal
+              employeeId={profile.id}
+              employeeName={profile.fullName}
+              announcements={staffAnnouncements}
+              bossThread={myThread}
+              bossThreadMessages={bossThreadMessages}
+              groupThreadMessages={groupThreadMessages}
+            />
             <Link
               href="/employee/invite-customer"
               className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-violet-600 px-3.5 text-xs font-semibold text-white shadow-violet-glow hover:bg-violet-500"
@@ -78,7 +91,7 @@ export default async function EmployeeDashboardPage() {
               className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-700 bg-midnight-900 px-3.5 text-xs font-medium text-slate-200 hover:border-violet-500/40"
             >
               <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Boss Thread</span>
+              <span>JR Family</span>
             </Link>
           </div>
         </div>
@@ -105,8 +118,8 @@ export default async function EmployeeDashboardPage() {
         </Card>
       ) : null}
 
-      {/* Work Queue Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Work Queue Cards (Price Offers panel removed) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card className="p-4 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs text-slate-400">Chats Awaiting Reply</span>
@@ -133,18 +146,6 @@ export default async function EmployeeDashboardPage() {
 
         <Card className="p-4 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-slate-400">Pending Price Offers</span>
-            <Coins className="h-4 w-4 text-amber-400" aria-hidden="true" />
-          </div>
-          <p className="text-2xl font-extrabold text-white">{pendingOffers.length}</p>
-          <Link href="/employee/offers" className="inline-flex items-center gap-1 text-xs text-violet-300 hover:underline">
-            <span>Negotiate Offers</span>
-            <ArrowRight className="h-3 w-3" aria-hidden="true" />
-          </Link>
-        </Card>
-
-        <Card className="p-4 space-y-2">
-          <div className="flex items-center justify-between">
             <span className="text-xs text-slate-400">My Chat Median Response</span>
             <Activity className="h-4 w-4 text-emerald-400" aria-hidden="true" />
           </div>
@@ -158,75 +159,47 @@ export default async function EmployeeDashboardPage() {
         </Card>
       </div>
 
-      {/* Active Assigned Tickets & Pending Offers Preview */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <Card className="p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-white">My Assigned Support Tickets</h2>
-            <Link href="/employee/tickets" className="text-xs text-violet-300 hover:underline">
-              All Tickets →
-            </Link>
-          </div>
-          {myAssignedTickets.length === 0 ? (
-            <p className="text-xs text-slate-400 py-4">No open tickets assigned to you right now.</p>
-          ) : (
-            myAssignedTickets.map((t) => (
-              <div
-                key={t.id}
-                className="flex items-center justify-between rounded-xl border border-slate-800 bg-midnight-950/70 p-3"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold text-violet-300">
-                      TKT-{t.ticketNo}
-                    </span>
-                    <Badge tone="cyan" className="uppercase">
-                      {t.status.replace(/_/g, ' ')}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-xs font-semibold text-white">{t.subject}</p>
-                  <p className="text-[11px] text-slate-400">{t.customerName}</p>
-                </div>
-                <Link
-                  href={`/employee/tickets?ticketId=${t.id}`}
-                  className="text-xs font-medium text-violet-300 hover:underline"
-                >
-                  Open →
-                </Link>
-              </div>
-            ))
-          )}
-        </Card>
+      {/* Pending Customers Queue (Visible to BOKA & All Employees) */}
+      <PendingCustomersQueueClient pendingCustomers={pendingCustomers} />
 
-        <Card className="p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-white">Recent Customer Offers</h2>
-            <Link href="/employee/offers" className="text-xs text-violet-300 hover:underline">
-              Negotiate →
-            </Link>
-          </div>
-          {offers.slice(0, 4).map((o) => (
+      {/* Active Assigned Tickets Preview */}
+      <Card className="p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-white">My Assigned Support Tickets</h2>
+          <Link href="/employee/tickets" className="text-xs text-violet-300 hover:underline">
+            All Tickets →
+          </Link>
+        </div>
+        {myAssignedTickets.length === 0 ? (
+          <p className="text-xs text-slate-400 py-4">No open tickets assigned to you right now.</p>
+        ) : (
+          myAssignedTickets.map((t) => (
             <div
-              key={o.id}
+              key={t.id}
               className="flex items-center justify-between rounded-xl border border-slate-800 bg-midnight-950/70 p-3"
             >
               <div>
-                <p className="text-xs font-bold text-white">{o.productTitle}</p>
-                <p className="text-[11px] text-slate-400">
-                  {o.customerName} • Offered{' '}
-                  <strong className="font-mono text-violet-300">
-                    {formatPaiseToINR(o.offeredPricePaise)}
-                  </strong>{' '}
-                  • {formatIST(o.createdAt)}
-                </p>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs font-bold text-violet-300">
+                    TKT-{t.ticketNo}
+                  </span>
+                  <Badge tone="cyan" className="uppercase">
+                    {t.status.replace(/_/g, ' ')}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-xs font-semibold text-white">{t.subject}</p>
+                <p className="text-[11px] text-slate-400">{t.customerName}</p>
               </div>
-              <Badge tone={o.status === 'pending' ? 'amber' : 'emerald'} className="uppercase">
-                {o.status}
-              </Badge>
+              <Link
+                href={`/employee/tickets?ticketId=${t.id}`}
+                className="text-xs font-medium text-violet-300 hover:underline"
+              >
+                Open →
+              </Link>
             </div>
-          ))}
-        </Card>
-      </div>
+          ))
+        )}
+      </Card>
     </div>
   );
 }

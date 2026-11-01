@@ -10,6 +10,7 @@ import {
   Ticket as TicketIcon,
   Users
 } from 'lucide-react';
+import { PendingCustomersQueueClient } from '@/components/shared/pending-customers-queue';
 import { Badge, Card } from '@/components/ui/primitives';
 import { requireActiveSession } from '@/lib/auth/session';
 import { getDataRepository } from '@/lib/data';
@@ -39,7 +40,14 @@ export default async function BossMasterDashboardPage() {
   ]);
 
   const activeCustomers = profiles.filter((p) => p.role === 'customer' && p.status === 'active');
+  const pendingCustomers = profiles.filter(
+    (p) => p.role === 'customer' && p.status === 'pending_approval'
+  );
   const activeEmployees = profiles.filter((p) => p.role === 'employee' && p.status === 'active');
+  const staffLookup: Record<string, string> = {};
+  for (const p of profiles) {
+    if (p.role !== 'customer') staffLookup[p.id] = p.fullName;
+  }
   const awaitingChats = conversations.filter((c) => c.awaitingStaff);
   const pendingOffers = offers.filter((o) => o.status === 'pending' || o.status === 'countered');
 
@@ -139,6 +147,12 @@ export default async function BossMasterDashboardPage() {
           </Link>
         </Card>
       </div>
+
+      {/* Pending Customers Queue (Visible to BOKA & All Employees) */}
+      <PendingCustomersQueueClient
+        pendingCustomers={pendingCustomers}
+        staffLookup={staffLookup}
+      />
 
       {/* Tickets by Status Breakdown */}
       <Card className="p-5 space-y-3">

@@ -14,6 +14,8 @@ import type {
   AppSettings,
   AuditLogEntry,
   CallerContext,
+  ComplaintChatMessage,
+  ComplaintChatRoom,
   Conversation,
   CustomerAnnouncement,
   CustomerMessageView,
@@ -24,12 +26,15 @@ import type {
   Invitation,
   Offer,
   OfferEvent,
+  OutboundEmailNotice,
+  PasswordAuthResult,
   PerformanceQueryFilter,
   Product,
   ProductStatus,
   Profile,
   PushSubscriptionRecord,
   SelectableStaffAlias,
+  SpinBonusStatus,
   StaffAnnouncement,
   StaffAnnouncementAck,
   StaffMessageView,
@@ -111,11 +116,56 @@ export class SupabaseDataRepository implements DataRepository {
     }));
   }
 
+  async listReportableStaffAliases(caller: CallerContext): Promise<SelectableStaffAlias[]> {
+    return this.fallback.listReportableStaffAliases(caller);
+  }
+
   async updateCustomerOwnProfile(
     caller: CallerContext,
     input: { fullName: string; email: string; phone: string }
   ): Promise<Profile> {
     return this.fallback.updateCustomerOwnProfile(caller, input);
+  }
+
+  async changeCustomerPassword(
+    caller: CallerContext,
+    input: { currentPassword?: string; newPassword: string }
+  ): Promise<void> {
+    try {
+      const supabase = await createSupabaseServerClient();
+      await supabase.auth.updateUser({ password: input.newPassword });
+    } catch {
+      // Fallback to mock state when running without live Supabase Auth
+    }
+    return this.fallback.changeCustomerPassword(caller, input);
+  }
+
+  async verifyEmailOtpAndSetPassword(input: {
+    email: string;
+    otpCode: string;
+    password: string;
+    fullName?: string;
+    phone?: string;
+  }): Promise<Profile> {
+    return this.fallback.verifyEmailOtpAndSetPassword(input);
+  }
+
+  async authenticateWithPassword(input: {
+    email: string;
+    password: string;
+  }): Promise<PasswordAuthResult> {
+    return this.fallback.authenticateWithPassword(input);
+  }
+
+  async adminSetUserPassword(
+    caller: CallerContext,
+    input: {
+      targetUserId: string;
+      newPassword: string;
+      newUsername?: string;
+    }
+  ): Promise<Profile> {
+    return this.fallback.adminSetUserPassword(caller, input);
   }
 
   async inviteUser(
@@ -126,6 +176,8 @@ export class SupabaseDataRepository implements DataRepository {
       phone?: string;
       intendedRole: 'customer' | 'employee';
       publicAlias?: string;
+      username?: string;
+      initialPassword?: string;
     }
   ): Promise<{ invitation: Invitation; profile: Profile }> {
     return this.fallback.inviteUser(caller, input);
@@ -133,6 +185,25 @@ export class SupabaseDataRepository implements DataRepository {
 
   async listInvitations(caller: CallerContext): Promise<Invitation[]> {
     return this.fallback.listInvitations(caller);
+  }
+
+  async listPendingCustomers(caller: CallerContext): Promise<Profile[]> {
+    return this.fallback.listPendingCustomers(caller);
+  }
+
+  async reviewPendingUser(
+    caller: CallerContext,
+    input: {
+      targetUserId: string;
+      decision: 'approve' | 'reject';
+      note?: string;
+    }
+  ): Promise<{ profile: Profile; emailNotice: OutboundEmailNotice }> {
+    return this.fallback.reviewPendingUser(caller, input);
+  }
+
+  async listSentEmails(caller: CallerContext): Promise<OutboundEmailNotice[]> {
+    return this.fallback.listSentEmails(caller);
   }
 
   async setUserStatus(
@@ -370,6 +441,27 @@ export class SupabaseDataRepository implements DataRepository {
     return this.fallback.autoCloseResolvedTickets(nowIso);
   }
 
+  async getComplaintChatRoomByTicket(
+    caller: CallerContext,
+    ticketId: string
+  ): Promise<ComplaintChatRoom | null> {
+    return this.fallback.getComplaintChatRoomByTicket(caller, ticketId);
+  }
+
+  async listComplaintChatMessages(
+    caller: CallerContext,
+    ticketId: string
+  ): Promise<ComplaintChatMessage[]> {
+    return this.fallback.listComplaintChatMessages(caller, ticketId);
+  }
+
+  async sendComplaintChatMessage(
+    caller: CallerContext,
+    input: { ticketId: string; body: string }
+  ): Promise<ComplaintChatMessage> {
+    return this.fallback.sendComplaintChatMessage(caller, input);
+  }
+
   async listStaffThreads(caller: CallerContext): Promise<StaffThread[]> {
     return this.fallback.listStaffThreads(caller);
   }
@@ -440,6 +532,14 @@ export class SupabaseDataRepository implements DataRepository {
 
   async purgeExpiredStories(nowIso?: string): Promise<number> {
     return this.fallback.purgeExpiredStories(nowIso);
+  }
+
+  async getSpinBonusStatus(caller: CallerContext): Promise<SpinBonusStatus> {
+    return this.fallback.getSpinBonusStatus(caller);
+  }
+
+  async spinDailyBonus(caller: CallerContext): Promise<SpinBonusStatus> {
+    return this.fallback.spinDailyBonus(caller);
   }
 
   async listNotifications(caller: CallerContext): Promise<AppNotification[]> {

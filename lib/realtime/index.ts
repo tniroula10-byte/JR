@@ -21,6 +21,23 @@ export type RealtimeTableName =
   | 'notifications';
 
 /**
+ * Evaluates whether a caller is permitted to establish a WebSocket / Realtime connection.
+ * Pending approval, rejected, invited, and suspended users cannot open a WebSocket connection.
+ */
+export function canOpenRealtimeConnection(caller: CallerContext): boolean {
+  return caller.status === 'active';
+}
+
+export function connectRealtimeSocket(caller: CallerContext): { connected: true; userId: string } {
+  if (!canOpenRealtimeConnection(caller)) {
+    throw new Error(
+      `FORBIDDEN_WEBSOCKET: Account with status "${caller.status}" cannot open a WebSocket connection.`
+    );
+  }
+  return { connected: true, userId: caller.userId };
+}
+
+/**
  * Evaluates whether a given Realtime `postgres_changes` row would pass PostgreSQL RLS
  * for a connected client socket (`caller`). Used by automated Realtime isolation tests.
  */
@@ -35,7 +52,7 @@ export function canReceiveRealtimeRow(
     ticketOwnerId?: string;
   }
 ): boolean {
-  if (caller.status !== 'active') return false;
+  if (!canOpenRealtimeConnection(caller)) return false;
 
   // Staff-only tables are NEVER delivered to a customer socket
   const staffOnlyTables: RealtimeTableName[] = [

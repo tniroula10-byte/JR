@@ -5,7 +5,7 @@
  */
 
 export type UserRole = 'boss' | 'employee' | 'customer';
-export type UserStatus = 'invited' | 'active' | 'suspended';
+export type UserStatus = 'invited' | 'pending_approval' | 'active' | 'rejected' | 'suspended';
 export type InvitationStatus = 'pending' | 'accepted' | 'expired' | 'revoked';
 export type InboxScopeMode = 'all' | 'assigned_only';
 export type ProductStatus = 'available' | 'sold_out' | 'hidden';
@@ -37,13 +37,37 @@ export interface Profile {
   id: string;
   role: UserRole;
   status: UserStatus;
+  username?: string;
   fullName: string;
   email: string;
   phone: string | null;
   avatarPath: string | null;
   invitedBy: string | null;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
   createdAt: string;
   lastSeenAt: string | null;
+}
+
+export interface OutboundEmailNotice {
+  id: string;
+  to: string;
+  subject: string;
+  body: string;
+  kind: 'customer_approved' | 'customer_rejected' | 'employee_approved' | 'employee_rejected';
+  sentAt: string;
+}
+
+export interface PasswordAuthResult {
+  ok: boolean;
+  code:
+    | 'SUCCESS'
+    | 'INVALID_CREDENTIALS'
+    | 'PENDING_APPROVAL'
+    | 'ACCOUNT_REJECTED'
+    | 'ACCOUNT_SUSPENDED';
+  error?: string;
+  profile?: Profile;
 }
 
 export interface StaffProfile {
@@ -237,6 +261,32 @@ export interface TicketEvent {
   createdAt: string;
 }
 
+export interface ComplaintChatRoom {
+  id: string;
+  ticketId: string;
+  ticketNo: number;
+  customerId: string;
+  customerName: string;
+  employeeId: string;
+  employeeName: string;
+  employeeAlias: string;
+  bossId: string;
+  bossName: string;
+  memberIds: [string, string, string];
+  createdAt: string;
+}
+
+export interface ComplaintChatMessage {
+  id: string;
+  roomId: string;
+  ticketId: string;
+  senderId: string;
+  senderRole: UserRole;
+  senderDisplayName: string;
+  body: string;
+  createdAt: string;
+}
+
 export interface StaffThread {
   id: string;
   employeeId: string;
@@ -302,6 +352,23 @@ export interface StoryView {
   customerId: string;
   customerName?: string;
   viewedAt: string;
+}
+
+export interface SpinBonusStatus {
+  dateKeyCalifornia: string;
+  hasSpunToday: boolean;
+  todaysSpin: {
+    rewardPoints: number;
+    rewardLabel: string;
+    spunAt: string;
+  } | null;
+  history: Array<{
+    id: string;
+    dateKeyCalifornia: string;
+    rewardPoints: number;
+    rewardLabel: string;
+    spunAt: string;
+  }>;
 }
 
 export interface AppNotification {
@@ -405,9 +472,33 @@ export interface DataRepository {
   listAllProfiles(caller: CallerContext): Promise<Profile[]>;
   listEmployeesWithFlags(caller: CallerContext): Promise<EmployeeWithFlags[]>;
   getSelectableStaffAliases(caller: CallerContext): Promise<SelectableStaffAlias[]>;
+  listReportableStaffAliases(caller: CallerContext): Promise<SelectableStaffAlias[]>;
   updateCustomerOwnProfile(
     caller: CallerContext,
     input: { fullName: string; email: string; phone: string }
+  ): Promise<Profile>;
+  changeCustomerPassword(
+    caller: CallerContext,
+    input: { currentPassword?: string; newPassword: string }
+  ): Promise<void>;
+  verifyEmailOtpAndSetPassword(input: {
+    email: string;
+    otpCode: string;
+    password: string;
+    fullName?: string;
+    phone?: string;
+  }): Promise<Profile>;
+  authenticateWithPassword(input: {
+    email: string;
+    password: string;
+  }): Promise<PasswordAuthResult>;
+  adminSetUserPassword(
+    caller: CallerContext,
+    input: {
+      targetUserId: string;
+      newPassword: string;
+      newUsername?: string;
+    }
   ): Promise<Profile>;
 
   // Invitations & User Management
@@ -419,9 +510,21 @@ export interface DataRepository {
       phone?: string;
       intendedRole: 'customer' | 'employee';
       publicAlias?: string;
+      username?: string;
+      initialPassword?: string;
     }
   ): Promise<{ invitation: Invitation; profile: Profile }>;
   listInvitations(caller: CallerContext): Promise<Invitation[]>;
+  listPendingCustomers(caller: CallerContext): Promise<Profile[]>;
+  reviewPendingUser(
+    caller: CallerContext,
+    input: {
+      targetUserId: string;
+      decision: 'approve' | 'reject';
+      note?: string;
+    }
+  ): Promise<{ profile: Profile; emailNotice: OutboundEmailNotice }>;
+  listSentEmails(caller: CallerContext): Promise<OutboundEmailNotice[]>;
   setUserStatus(
     caller: CallerContext,
     targetUserId: string,
@@ -544,6 +647,18 @@ export interface DataRepository {
     input: { ticketId: string; toStatus: TicketStatus }
   ): Promise<Ticket>;
   autoCloseResolvedTickets(nowIso?: string): Promise<number>;
+  getComplaintChatRoomByTicket(
+    caller: CallerContext,
+    ticketId: string
+  ): Promise<ComplaintChatRoom | null>;
+  listComplaintChatMessages(
+    caller: CallerContext,
+    ticketId: string
+  ): Promise<ComplaintChatMessage[]>;
+  sendComplaintChatMessage(
+    caller: CallerContext,
+    input: { ticketId: string; body: string }
+  ): Promise<ComplaintChatMessage>;
 
   // Boss-Employee Threads & Staff Channel
   listStaffThreads(caller: CallerContext): Promise<StaffThread[]>;
@@ -584,6 +699,8 @@ export interface DataRepository {
   ): Promise<Story>;
   recordStoryView(caller: CallerContext, storyId: string): Promise<void>;
   purgeExpiredStories(nowIso?: string): Promise<number>;
+  getSpinBonusStatus(caller: CallerContext): Promise<SpinBonusStatus>;
+  spinDailyBonus(caller: CallerContext): Promise<SpinBonusStatus>;
 
   // Notifications & Push
   listNotifications(caller: CallerContext): Promise<AppNotification[]>;

@@ -15,6 +15,7 @@ import { checkRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
 import {
   AppSettingsUpdateSchema,
   AssignTicketSchema,
+  ChangeCustomerPasswordSchema,
   CreateTicketSchema,
   CustomerAnnouncementCreateSchema,
   InviteUserSchema,
@@ -40,6 +41,17 @@ export async function switchMockPersonaAction(userId: string) {
   });
   revalidatePath('/', 'layout');
   return { ok: true, userId };
+}
+
+export async function signOutAction() {
+  const cookieStore = await cookies();
+  cookieStore.set(MOCK_SESSION_COOKIE, 'anon', {
+    path: '/',
+    httpOnly: false,
+    sameSite: 'lax'
+  });
+  revalidatePath('/', 'layout');
+  return { ok: true };
 }
 
 /**
@@ -68,8 +80,8 @@ export async function requestMagicLinkAction(input: { email: string }) {
   const repo = getDataRepository();
   const profile = await repo.getProfileByEmail(email);
 
-  // Never create an account for an uninvited email; if suspended or uninvited, do not issue session
-  const canSignIn = Boolean(profile && profile.status !== 'suspended');
+  // Never create an account for an uninvited email; if pending_approval, rejected, or suspended, do not issue session
+  const canSignIn = Boolean(profile && profile.status === 'active');
 
   return {
     ok: true,
@@ -80,12 +92,123 @@ export async function requestMagicLinkAction(input: { email: string }) {
   };
 }
 
+export async function verifyEmailOtpAndSetPasswordAction(rawInput: {
+  email: string;
+  otpCode: string;
+  password: string;
+  fullName?: string;
+  phone?: string;
+}) {
+  try {
+    const repo = getDataRepository();
+    const profile = await repo.verifyEmailOtpAndSetPassword(rawInput);
+    revalidatePath('/boss/customers');
+    revalidatePath('/employee/dashboard');
+    revalidatePath('/employee/invite-customer');
+    return {
+      ok: true,
+      data: profile,
+      message:
+        'Email OTP verified and password set. Your account is now awaiting approval before your first login.'
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'OTP verification failed'
+    };
+  }
+}
+
+export async function loginWithPasswordAction(rawInput: {
+  email: string;
+  password: string;
+}) {
+  const repo = getDataRepository();
+  const res = await repo.authenticateWithPassword(rawInput);
+  if (!res.ok || !res.profile) {
+    return {
+      ok: false,
+      code: res.code,
+      error: res.error ?? 'Invalid email or password.'
+    };
+  }
+
+  const cookieStore = await cookies();
+  cookieStore.set(MOCK_SESSION_COOKIE, res.profile.id, {
+    path: '/',
+    httpOnly: false,
+    sameSite: 'lax'
+  });
+  revalidatePath('/', 'layout');
+
+  const redirectPath =
+    res.profile.role === 'boss'
+      ? '/boss/dashboard'
+      : res.profile.role === 'employee'
+        ? '/employee/dashboard'
+        : '/home';
+
+  return {
+    ok: true,
+    code: 'SUCCESS' as const,
+    profile: res.profile,
+    redirectPath
+  };
+}
+
+export async function reviewPendingUserAction(rawInput: {
+  targetUserId: string;
+  decision: 'approve' | 'reject';
+  note?: string;
+}) {
+  const { caller } = await requireActiveSession(['boss', 'employee']);
+  try {
+    const repo = getDataRepository();
+    const res = await repo.reviewPendingUser(caller, rawInput);
+    revalidatePath('/boss/customers');
+    revalidatePath('/boss/employees');
+    revalidatePath('/boss/audit');
+    revalidatePath('/employee/dashboard');
+    revalidatePath('/employee/invite-customer');
+    return { ok: true, data: res };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Review action failed'
+    };
+  }
+}
+
+export async function adminSetUserPasswordAction(rawInput: {
+  targetUserId: string;
+  newPassword: string;
+  newUsername?: string;
+}) {
+  const { caller } = await requireActiveSession(['boss']);
+  try {
+    const repo = getDataRepository();
+    const updated = await repo.adminSetUserPassword(caller, rawInput);
+    revalidatePath('/boss/settings');
+    revalidatePath('/boss/employees');
+    revalidatePath('/boss/customers');
+    revalidatePath('/boss/audit');
+    return { ok: true, data: updated };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Failed to update password'
+    };
+  }
+}
+
 export async function inviteUserAction(rawInput: {
   email: string;
   fullName: string;
   phone?: string;
   intendedRole: 'customer' | 'employee';
   publicAlias?: string;
+  username?: string;
+  initialPassword?: string;
 }) {
   const { caller } = await requireActiveSession(['boss', 'employee']);
   const parsed = InviteUserSchema.safeParse(rawInput);
@@ -545,5 +668,69 @@ export async function updateCustomerProfileAction(rawInput: {
     return { ok: true, data: updated };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Profile update failed' };
+  }
+}
+
+export async function changeCustomerPasswordAction(rawInput: {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}) {
+  const { caller } = await requireActiveSession(['customer']);
+  const parsed = ChangeCustomerPasswordSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid password input.' };
+  }
+  try {
+    const repo = getDataRepository();
+    await repo.changeCustomerPassword(caller, {
+      currentPassword: parsed.data.currentPassword,
+      newPassword: parsed.data.newPassword
+    });
+    revalidatePath('/profile');
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Password change failed' };
+  }
+}
+
+export async function sendComplaintChatMessageAction(rawInput: {
+  ticketId: string;
+  body: string;
+}) {
+  const { caller } = await requireActiveSession(['boss', 'employee', 'customer']);
+  if (!rawInput.ticketId || !rawInput.body || !rawInput.body.trim()) {
+    return { ok: false, error: 'Message body is required.' };
+  }
+  try {
+    const repo = getDataRepository();
+    const msg = await repo.sendComplaintChatMessage(caller, {
+      ticketId: rawInput.ticketId,
+      body: rawInput.body.trim()
+    });
+    revalidatePath('/tickets');
+    revalidatePath('/employee/tickets');
+    revalidatePath('/boss/tickets');
+    return { ok: true, data: msg };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Complaint chat message failed'
+    };
+  }
+}
+
+export async function spinDailyBonusAction() {
+  const { caller } = await requireActiveSession(['customer']);
+  try {
+    const repo = getDataRepository();
+    const status = await repo.spinDailyBonus(caller);
+    revalidatePath('/home');
+    return { ok: true, data: status };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Daily spin bonus failed'
+    };
   }
 }

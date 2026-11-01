@@ -23,12 +23,18 @@ export default async function EmployeeTicketsPage({
     tickets[0] ??
     null;
 
-  const [messages, events] = selected
+  const [messages, events, complaintRoom] = selected
     ? await Promise.all([
         repo.listStaffTicketMessages(caller, selected.id),
-        repo.listTicketEvents(caller, selected.id)
+        repo.listTicketEvents(caller, selected.id),
+        repo.getComplaintChatRoomByTicket(caller, selected.id)
       ])
-    : [[], []];
+    : [[], [], null];
+
+  const complaintMessages =
+    selected && complaintRoom
+      ? await repo.listComplaintChatMessages(caller, selected.id)
+      : [];
 
   return (
     <StaffTicketsClient
@@ -39,6 +45,8 @@ export default async function EmployeeTicketsPage({
       selectedTicket={selected}
       messages={messages}
       events={events}
+      complaintRoom={complaintRoom}
+      complaintMessages={complaintMessages}
       employees={employees}
     />
   );

@@ -14,7 +14,9 @@ import {
 import { calculateEmployeeMetrics } from '@/lib/analytics/metrics';
 import { formatPaiseToINR } from '@/lib/money';
 import { checkRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
+import { getCaliforniaDateKey } from '@/lib/time';
 import { validateTicketTransition } from '@/lib/tickets/state-machine';
+import { validateBasicPasswordFormat } from '@/lib/validation/schemas';
 import type {
   ActivityEvent,
   AnnouncementPriority,
@@ -22,6 +24,8 @@ import type {
   AppSettings,
   AuditLogEntry,
   CallerContext,
+  ComplaintChatMessage,
+  ComplaintChatRoom,
   Conversation,
   CustomerAnnouncement,
   CustomerMessageView,
@@ -32,12 +36,15 @@ import type {
   Invitation,
   Offer,
   OfferEvent,
+  OutboundEmailNotice,
+  PasswordAuthResult,
   PerformanceQueryFilter,
   Product,
   ProductStatus,
   Profile,
   PushSubscriptionRecord,
   SelectableStaffAlias,
+  SpinBonusStatus,
   StaffAnnouncement,
   StaffAnnouncementAck,
   StaffMessageView,
@@ -63,13 +70,20 @@ function getState(): MockDatabaseState {
   if (process.env.JR_PERSIST_MOCK_FILE === '1' && fs.existsSync(STATE_FILE_PATH)) {
     try {
       const raw = fs.readFileSync(STATE_FILE_PATH, 'utf8');
-      globalMockHolder.__jrMockState = JSON.parse(raw) as MockDatabaseState;
-      return globalMockHolder.__jrMockState;
+      const parsed = JSON.parse(raw) as MockDatabaseState;
+      if (parsed.profiles?.[0]?.username === 'BOKA10' && parsed.customerPasswords?.['cust-3']) {
+        globalMockHolder.__jrMockState = parsed;
+        return globalMockHolder.__jrMockState;
+      }
     } catch {
       // Fallback to in-memory
     }
   }
-  if (!globalMockHolder.__jrMockState) {
+  if (
+    !globalMockHolder.__jrMockState ||
+    globalMockHolder.__jrMockState.profiles?.[0]?.username !== 'BOKA10' ||
+    !globalMockHolder.__jrMockState.customerPasswords?.['cust-3']
+  ) {
     globalMockHolder.__jrMockState = createInitialMockState();
   }
   return globalMockHolder.__jrMockState;
@@ -231,6 +245,20 @@ export class MockDataRepository implements DataRepository {
       }));
   }
 
+  async listReportableStaffAliases(caller: CallerContext): Promise<SelectableStaffAlias[]> {
+    const state = getState();
+    assertActiveCaller(state, caller);
+    return state.staffProfiles
+      .filter((sp) => {
+        const prof = state.profiles.find((p) => p.id === sp.userId);
+        return prof && prof.role === 'employee' && prof.status === 'active' && sp.acceptsTickets;
+      })
+      .map((sp) => ({
+        staffId: sp.userId,
+        publicAlias: sp.publicAlias
+      }));
+  }
+
   async updateCustomerOwnProfile(
     caller: CallerContext,
     input: { fullName: string; email: string; phone: string }
@@ -268,6 +296,264 @@ export class MockDataRepository implements DataRepository {
     return { ...p };
   }
 
+  async changeCustomerPassword(
+    caller: CallerContext,
+    input: { currentPassword?: string; newPassword: string }
+  ): Promise<void> {
+    const state = getState();
+    const p = assertCustomer(state, caller);
+    if (!state.customerPasswords) {
+      state.customerPasswords = {};
+    }
+    const existingPassword = state.customerPasswords[p.id];
+    if (
+      existingPassword &&
+      input.currentPassword &&
+      input.currentPassword !== existingPassword
+    ) {
+      throw new Error('INVALID_PASSWORD: Current password does not match.');
+    }
+    const formatCheck = validateBasicPasswordFormat(input.newPassword);
+    if (!formatCheck.valid) {
+      throw new Error(formatCheck.error);
+    }
+    state.customerPasswords[p.id] = input.newPassword;
+
+    state.auditLogs.unshift({
+      id: `aud-${Date.now()}-pwd`,
+      actorId: p.id,
+      actorName: p.fullName,
+      action: 'customer_password_changed',
+      entity: 'profiles',
+      entityId: p.id,
+      beforeMeta: null,
+      afterMeta: { passwordUpdated: true },
+      ip: '127.0.0.1',
+      createdAt: new Date().toISOString()
+    });
+
+    saveState(state);
+  }
+
+  async verifyEmailOtpAndSetPassword(input: {
+    email: string;
+    otpCode: string;
+    password: string;
+    fullName?: string;
+    phone?: string;
+  }): Promise<Profile> {
+    const state = getState();
+    const cleanEmail = input.email.trim().toLowerCase();
+    const cleanOtp = input.otpCode.trim();
+    if (!cleanOtp || cleanOtp.length < 4) {
+      throw new Error('INVALID_OTP: Invalid or expired email OTP code.');
+    }
+    const nowIso = new Date().toISOString();
+    let profile = state.profiles.find((p) => p.email.toLowerCase() === cleanEmail);
+
+    if (profile && profile.role !== 'customer') {
+      throw new Error(
+        'FORBIDDEN: Employee and Boss passwords are set directly by BOKA. Email OTP is for customers only.'
+      );
+    }
+
+    const formatCheck = validateBasicPasswordFormat(input.password);
+    if (!formatCheck.valid) {
+      throw new Error(formatCheck.error);
+    }
+
+    if (!profile) {
+      const newId = `cust-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      profile = {
+        id: newId,
+        role: 'customer',
+        status: 'pending_approval',
+        username: cleanEmail.split('@')[0],
+        fullName: input.fullName?.trim() || cleanEmail.split('@')[0] || 'Customer',
+        email: cleanEmail,
+        phone: input.phone?.trim() || null,
+        avatarPath: null,
+        invitedBy: null,
+        approvedBy: null,
+        approvedAt: null,
+        createdAt: nowIso,
+        lastSeenAt: null
+      };
+      state.profiles.push(profile);
+
+      state.conversations.push({
+        id: `conv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        customerId: newId,
+        customerName: profile.fullName,
+        customerEmail: profile.email,
+        handledBy: null,
+        handledByName: null,
+        handledByAlias: null,
+        awaitingStaff: false,
+        lastMessageAt: null,
+        lastMessagePreview: null,
+        customerLastReadAt: null,
+        staffLastReadAt: null,
+        customerUnreadCount: 0,
+        staffUnreadCount: 0,
+        createdAt: nowIso
+      });
+    } else {
+      // After a customer verifies their email OTP and sets a password, their status becomes PENDING_APPROVAL instead of ACTIVE
+      if (!profile.approvedAt && profile.status !== 'active') {
+        profile.status = 'pending_approval';
+      } else if (profile.role === 'customer' && !profile.approvedAt) {
+        profile.status = 'pending_approval';
+      }
+      if (input.fullName?.trim()) {
+        profile.fullName = input.fullName.trim();
+      }
+      if (input.phone?.trim()) {
+        profile.phone = input.phone.trim();
+      }
+    }
+
+    if (!state.customerPasswords) {
+      state.customerPasswords = {};
+    }
+    state.customerPasswords[profile.id] = input.password;
+
+    const inv = state.invitations.find(
+      (i) => i.email.toLowerCase() === cleanEmail && i.status === 'pending'
+    );
+    if (inv) {
+      inv.status = 'accepted';
+      inv.acceptedAt = nowIso;
+    }
+
+    saveState(state);
+    return { ...profile };
+  }
+
+  async authenticateWithPassword(input: {
+    email: string;
+    password: string;
+  }): Promise<PasswordAuthResult> {
+    const state = getState();
+    const cleanId = input.email.trim().toLowerCase();
+    const profile = state.profiles.find(
+      (p) =>
+        p.email.toLowerCase() === cleanId ||
+        p.username?.toLowerCase() === cleanId ||
+        (p.role !== 'customer' && p.fullName.toLowerCase() === cleanId)
+    );
+
+    if (!profile) {
+      return {
+        ok: false,
+        code: 'INVALID_CREDENTIALS',
+        error: 'Invalid email or password.'
+      };
+    }
+
+    const storedPassword = state.customerPasswords?.[profile.id];
+    if (!storedPassword || storedPassword !== input.password) {
+      // Do NOT reveal whether the email/username is registered or pending approval when password is wrong
+      return {
+        ok: false,
+        code: 'INVALID_CREDENTIALS',
+        error: 'Invalid email or password.'
+      };
+    }
+
+    if (profile.status === 'pending_approval' || profile.status === 'invited') {
+      return {
+        ok: false,
+        code: 'PENDING_APPROVAL',
+        error: 'Your account is awaiting approval. You will receive an email once approved.'
+      };
+    }
+
+    if (profile.status === 'rejected') {
+      return {
+        ok: false,
+        code: 'ACCOUNT_REJECTED',
+        error: 'Unable to sign in with these credentials.'
+      };
+    }
+
+    if (profile.status === 'suspended') {
+      return {
+        ok: false,
+        code: 'ACCOUNT_SUSPENDED',
+        error: 'This account has been suspended by administration.'
+      };
+    }
+
+    profile.lastSeenAt = new Date().toISOString();
+    saveState(state);
+    return {
+      ok: true,
+      code: 'SUCCESS',
+      profile: { ...profile }
+    };
+  }
+
+  async adminSetUserPassword(
+    caller: CallerContext,
+    input: {
+      targetUserId: string;
+      newPassword: string;
+      newUsername?: string;
+    }
+  ): Promise<Profile> {
+    const state = getState();
+    const boss = assertBoss(state, caller);
+
+    const target = state.profiles.find((p) => p.id === input.targetUserId);
+    if (!target) {
+      throw new Error('NOT_FOUND: Target user not found.');
+    }
+
+    const cleanPassword = input.newPassword.trim();
+    if (!cleanPassword) {
+      throw new Error('INVALID_PASSWORD: Password cannot be empty.');
+    }
+
+    // Basic password format is compulsory for Employees and Customers, NOT for BOKA (boss)
+    if (target.role !== 'boss') {
+      const formatCheck = validateBasicPasswordFormat(cleanPassword);
+      if (!formatCheck.valid) {
+        throw new Error(formatCheck.error);
+      }
+    }
+
+    if (!state.customerPasswords) {
+      state.customerPasswords = {};
+    }
+    state.customerPasswords[target.id] = cleanPassword;
+
+    if (input.newUsername?.trim()) {
+      target.username = input.newUsername.trim();
+    }
+
+    state.auditLogs.unshift({
+      id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      actorId: boss.id,
+      actorName: boss.fullName,
+      action: 'admin_set_user_password',
+      entity: 'profiles',
+      entityId: target.id,
+      beforeMeta: null,
+      afterMeta: {
+        targetRole: target.role,
+        targetName: target.fullName,
+        username: target.username ?? null,
+        passwordUpdatedByBoss: true
+      },
+      ip: '127.0.0.1',
+      createdAt: new Date().toISOString()
+    });
+
+    saveState(state);
+    return { ...target };
+  }
+
   async inviteUser(
     caller: CallerContext,
     input: {
@@ -276,6 +562,8 @@ export class MockDataRepository implements DataRepository {
       phone?: string;
       intendedRole: 'customer' | 'employee';
       publicAlias?: string;
+      username?: string;
+      initialPassword?: string;
     }
   ): Promise<{ invitation: Invitation; profile: Profile }> {
     const state = getState();
@@ -299,19 +587,34 @@ export class MockDataRepository implements DataRepository {
     const expiresIso = new Date(Date.now() + 7 * 24 * 3600_000).toISOString();
     const newId = `${input.intendedRole === 'employee' ? 'emp' : 'cust'}-${Date.now()}`;
 
+    if (input.initialPassword?.trim()) {
+      const formatCheck = validateBasicPasswordFormat(input.initialPassword.trim());
+      if (!formatCheck.valid) {
+        throw new Error(formatCheck.error);
+      }
+    }
+
     const newProfile: Profile = {
       id: newId,
       role: input.intendedRole,
-      status: 'active',
+      status: 'pending_approval',
+      username: input.username?.trim() || input.publicAlias?.trim() || cleanEmail.split('@')[0],
       fullName: input.fullName.trim(),
       email: cleanEmail,
       phone: input.phone?.trim() || null,
       avatarPath: null,
       invitedBy: actor.id,
+      approvedBy: null,
+      approvedAt: null,
       createdAt: nowIso,
       lastSeenAt: null
     };
     state.profiles.push(newProfile);
+
+    if (input.initialPassword?.trim()) {
+      if (!state.customerPasswords) state.customerPasswords = {};
+      state.customerPasswords[newId] = input.initialPassword.trim();
+    }
 
     if (input.intendedRole === 'employee') {
       const alias =
@@ -416,6 +719,128 @@ export class MockDataRepository implements DataRepository {
     return state.invitations.map((i) => ({ ...i }));
   }
 
+  async listPendingCustomers(caller: CallerContext): Promise<Profile[]> {
+    const state = getState();
+    assertStaff(state, caller);
+    return state.profiles
+      .filter((p) => p.role === 'customer' && p.status === 'pending_approval')
+      .map((p) => ({ ...p }));
+  }
+
+  async reviewPendingUser(
+    caller: CallerContext,
+    input: {
+      targetUserId: string;
+      decision: 'approve' | 'reject';
+      note?: string;
+    }
+  ): Promise<{ profile: Profile; emailNotice: OutboundEmailNotice }> {
+    const state = getState();
+    const actor = assertActiveCaller(state, caller);
+
+    if (actor.role === 'customer') {
+      throw new Error('FORBIDDEN: Customers cannot approve or reject anyone.');
+    }
+
+    const target = state.profiles.find((p) => p.id === input.targetUserId);
+    if (!target) {
+      throw new Error('NOT_FOUND: Target user not found.');
+    }
+
+    if (target.role === 'boss') {
+      throw new Error('FORBIDDEN: Cannot modify Boss account approval.');
+    }
+
+    // Employee approval stays Boka-only. Employees cannot approve other employees.
+    if (target.role === 'employee' && actor.role !== 'boss') {
+      throw new Error(
+        'FORBIDDEN: Employee approval is BOKA-only. Employees cannot approve or reject other employees.'
+      );
+    }
+
+    if (target.status !== 'pending_approval' && target.status !== 'invited') {
+      throw new Error(
+        `INVALID_STATUS: User is currently "${target.status}" and is not awaiting first-login approval.`
+      );
+    }
+
+    const prevStatus = target.status;
+    const nowIso = new Date().toISOString();
+
+    let emailNotice: OutboundEmailNotice;
+    if (input.decision === 'approve') {
+      target.status = 'active';
+      target.approvedBy = actor.id;
+      target.approvedAt = nowIso;
+
+      emailNotice = {
+        id: `email-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        to: target.email,
+        subject: 'Your John Rambo Account is Active',
+        body: `Hello ${target.fullName}, your account has been approved and is now active. You may now sign in.`,
+        kind: target.role === 'customer' ? 'customer_approved' : 'employee_approved',
+        sentAt: nowIso
+      };
+    } else {
+      target.status = 'rejected';
+
+      emailNotice = {
+        id: `email-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        to: target.email,
+        subject: 'John Rambo Account Notice',
+        body: 'Thank you for your interest. We are unable to complete your account registration at this time.',
+        kind: target.role === 'customer' ? 'customer_rejected' : 'employee_rejected',
+        sentAt: nowIso
+      };
+    }
+
+    if (!state.sentEmails) {
+      state.sentEmails = [];
+    }
+    state.sentEmails.unshift(emailNotice);
+
+    const auditAction =
+      input.decision === 'approve'
+        ? target.role === 'customer'
+          ? 'customer_approved'
+          : 'employee_approved'
+        : target.role === 'customer'
+          ? 'customer_rejected'
+          : 'employee_rejected';
+
+    state.auditLogs.unshift({
+      id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      actorId: actor.id,
+      actorName: actor.fullName,
+      action: auditAction,
+      entity: 'profiles',
+      entityId: target.id,
+      beforeMeta: { status: prevStatus },
+      afterMeta: {
+        status: target.status,
+        decision: input.decision,
+        approvedBy: actor.id,
+        approvedByName: actor.fullName,
+        targetRole: target.role,
+        note: input.note ?? null
+      },
+      ip: '127.0.0.1',
+      createdAt: nowIso
+    });
+
+    saveState(state);
+    return {
+      profile: { ...target },
+      emailNotice: { ...emailNotice }
+    };
+  }
+
+  async listSentEmails(caller: CallerContext): Promise<OutboundEmailNotice[]> {
+    const state = getState();
+    assertStaff(state, caller);
+    return (state.sentEmails ?? []).map((e) => ({ ...e }));
+  }
+
   async setUserStatus(
     caller: CallerContext,
     targetUserId: string,
@@ -429,6 +854,15 @@ export class MockDataRepository implements DataRepository {
     }
     if (target.role === 'boss') {
       throw new Error('FORBIDDEN: Cannot suspend the singleton Boss account.');
+    }
+    // Approval happens once: suspending/unsuspending never sends an approved account back to pending_approval
+    if (
+      newStatus === 'pending_approval' &&
+      (target.approvedAt || target.status === 'active' || target.status === 'suspended')
+    ) {
+      throw new Error(
+        'INVALID_STATUS: Approval happens once. Suspending or unsuspending cannot send a user back to the approval queue.'
+      );
     }
 
     const prevStatus = target.status;
@@ -1558,10 +1992,9 @@ export class MockDataRepository implements DataRepository {
     let assignedEmpAlias: string | null = null;
     let initialStatus: TicketStatus = 'open';
 
-    if (input.requestedEmployeeId && state.appSettings.customerCanPickEmployee) {
+    if (input.requestedEmployeeId) {
       const sp = state.staffProfiles.find(
-        (s) =>
-          s.userId === input.requestedEmployeeId && s.customerSelectable && s.acceptsTickets
+        (s) => s.userId === input.requestedEmployeeId && s.acceptsTickets
       );
       const empProf = state.profiles.find(
         (p) => p.id === input.requestedEmployeeId && p.role === 'employee' && p.status === 'active'
@@ -1623,7 +2056,7 @@ export class MockDataRepository implements DataRepository {
       createdAt: nowIso
     });
 
-    if (assignedEmpId) {
+    if (assignedEmpId && assignedEmpName && assignedEmpAlias) {
       state.ticketEvents.push({
         id: `tev-${Date.now()}-assign`,
         ticketId: tktId,
@@ -1634,6 +2067,68 @@ export class MockDataRepository implements DataRepository {
         toValue: assignedEmpId,
         createdAt: nowIso
       });
+
+      // Automatically create a private 3-member Complaint Chat room:
+      // 1) Main Admin (Boss), 2) That Employee, 3) The Customer
+      const bossProf = state.profiles.find((p) => p.role === 'boss') ?? {
+        id: 'boss-1',
+        fullName: 'Col. Rajesh Rathore (Boss)'
+      };
+      const roomId = `croom-${Date.now()}`;
+      const newRoom: ComplaintChatRoom = {
+        id: roomId,
+        ticketId: tktId,
+        ticketNo: nextNo,
+        customerId: customer.id,
+        customerName: customer.fullName,
+        employeeId: assignedEmpId,
+        employeeName: assignedEmpName,
+        employeeAlias: assignedEmpAlias,
+        bossId: bossProf.id,
+        bossName: bossProf.fullName,
+        memberIds: [bossProf.id, assignedEmpId, customer.id],
+        createdAt: nowIso
+      };
+      if (!state.complaintChatRooms) state.complaintChatRooms = [];
+      if (!state.complaintChatMessages) state.complaintChatMessages = [];
+      state.complaintChatRooms.unshift(newRoom);
+
+      state.complaintChatMessages.push({
+        id: `ccmsg-${Date.now()}`,
+        roomId,
+        ticketId: tktId,
+        senderId: customer.id,
+        senderRole: 'customer',
+        senderDisplayName: `${customer.fullName} (Customer)`,
+        body: input.description.trim(),
+        createdAt: nowIso
+      });
+
+      // Notify Boss and that Employee about the 3-member complaint room
+      state.notifications.unshift(
+        {
+          id: `notif-${Date.now()}-boss-croom`,
+          recipientId: bossProf.id,
+          type: 'complaint_room_created',
+          title: `3-Member Complaint Chat Opened (TKT-${nextNo})`,
+          body: `${customer.fullName} raised a ticket involving ${assignedEmpName} (${assignedEmpAlias}).`,
+          link: `/boss/tickets?ticketId=${tktId}`,
+          payload: { ticketId: tktId, roomId },
+          readAt: null,
+          createdAt: nowIso
+        },
+        {
+          id: `notif-${Date.now()}-${assignedEmpId}-croom`,
+          recipientId: assignedEmpId,
+          type: 'complaint_room_created',
+          title: `3-Member Complaint Chat Opened (TKT-${nextNo})`,
+          body: `You, Main Admin (Boss), and ${customer.fullName} have been added to a private complaint chat room.`,
+          link: `/employee/tickets?ticketId=${tktId}`,
+          payload: { ticketId: tktId, roomId },
+          readAt: null,
+          createdAt: nowIso
+        }
+      );
     }
 
     state.activityEvents.unshift({
@@ -2057,6 +2552,106 @@ export class MockDataRepository implements DataRepository {
     return closedCount;
   }
 
+  async getComplaintChatRoomByTicket(
+    caller: CallerContext,
+    ticketId: string
+  ): Promise<ComplaintChatRoom | null> {
+    const state = getState();
+    const actor = assertActiveCaller(state, caller);
+    const room = (state.complaintChatRooms ?? []).find((r) => r.ticketId === ticketId);
+    if (!room) return null;
+    if (!room.memberIds.includes(actor.id)) {
+      return null;
+    }
+    return { ...room };
+  }
+
+  async listComplaintChatMessages(
+    caller: CallerContext,
+    ticketId: string
+  ): Promise<ComplaintChatMessage[]> {
+    const state = getState();
+    const actor = assertActiveCaller(state, caller);
+    const room = (state.complaintChatRooms ?? []).find((r) => r.ticketId === ticketId);
+    if (!room) return [];
+    if (!room.memberIds.includes(actor.id)) {
+      throw new Error(
+        'FORBIDDEN: Only the 3 complaint chat room members (Boss, reported Employee, and Customer) can access this private room.'
+      );
+    }
+    return (state.complaintChatMessages ?? [])
+      .filter((m) => m.roomId === room.id)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      .map((m) => ({ ...m }));
+  }
+
+  async sendComplaintChatMessage(
+    caller: CallerContext,
+    input: { ticketId: string; body: string }
+  ): Promise<ComplaintChatMessage> {
+    const state = getState();
+    const actor = assertActiveCaller(state, caller);
+    const room = (state.complaintChatRooms ?? []).find((r) => r.ticketId === input.ticketId);
+    if (!room) {
+      throw new Error('NOT_FOUND: Complaint chat room not found for this ticket.');
+    }
+    if (!room.memberIds.includes(actor.id)) {
+      throw new Error(
+        'FORBIDDEN: Only the 3 complaint chat room members (Boss, reported Employee, and Customer) can post in this private room.'
+      );
+    }
+
+    const cleanBody = input.body.trim();
+    if (!cleanBody) {
+      throw new Error('INVALID_MESSAGE: Message body cannot be empty.');
+    }
+
+    const nowIso = new Date().toISOString();
+    const displayName =
+      actor.role === 'boss'
+        ? `${actor.fullName} (Main Admin / Boss)`
+        : actor.role === 'employee'
+          ? `${room.employeeAlias} (Employee)`
+          : `${actor.fullName} (Customer)`;
+
+    const msg: ComplaintChatMessage = {
+      id: `ccmsg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      roomId: room.id,
+      ticketId: room.ticketId,
+      senderId: actor.id,
+      senderRole: actor.role,
+      senderDisplayName: displayName,
+      body: cleanBody,
+      createdAt: nowIso
+    };
+
+    if (!state.complaintChatMessages) state.complaintChatMessages = [];
+    state.complaintChatMessages.push(msg);
+
+    for (const memberId of room.memberIds) {
+      if (memberId === actor.id) continue;
+      state.notifications.unshift({
+        id: `notif-${Date.now()}-${memberId}-ccmsg`,
+        recipientId: memberId,
+        type: 'complaint_chat_message',
+        title: `New message in Complaint Room (TKT-${room.ticketNo})`,
+        body: cleanBody.slice(0, 100),
+        link:
+          memberId === room.bossId
+            ? `/boss/tickets?ticketId=${room.ticketId}`
+            : memberId === room.employeeId
+              ? `/employee/tickets?ticketId=${room.ticketId}`
+              : `/tickets?ticketId=${room.ticketId}`,
+        payload: { ticketId: room.ticketId, roomId: room.id },
+        readAt: null,
+        createdAt: nowIso
+      });
+    }
+
+    saveState(state);
+    return { ...msg };
+  }
+
   async listStaffThreads(caller: CallerContext): Promise<StaffThread[]> {
     const state = getState();
     // Decision 8: Customers have no access. Boss and all active employees can read all threads.
@@ -2070,8 +2665,10 @@ export class MockDataRepository implements DataRepository {
   ): Promise<StaffThreadMessage[]> {
     const state = getState();
     assertStaff(state, caller);
-    const thread = state.staffThreads.find((t) => t.id === threadId);
-    if (!thread) throw new Error('NOT_FOUND: Staff thread not found.');
+    if (threadId !== 'sthread-group') {
+      const thread = state.staffThreads.find((t) => t.id === threadId);
+      if (!thread) throw new Error('NOT_FOUND: Staff thread not found.');
+    }
     return state.staffThreadMessages
       .filter((m) => m.threadId === threadId)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
@@ -2084,20 +2681,40 @@ export class MockDataRepository implements DataRepository {
   ): Promise<StaffThreadMessage> {
     const state = getState();
     const staff = assertStaff(state, caller);
-    const thread = state.staffThreads.find((t) => t.id === input.threadId);
-    if (!thread) throw new Error('NOT_FOUND: Staff thread not found.');
-
-    // Decision 8: Boss and THAT employee can read and write it. Other employees can read it but CANNOT write.
-    if (staff.role === 'employee' && thread.employeeId !== staff.id) {
-      throw new Error(
-        "FORBIDDEN: Employees have read-only access to colleagues' threads and cannot post in them."
-      );
-    }
 
     const nowIso = new Date().toISOString();
     const cleanBody = input.body.trim();
+    const sp = state.staffProfiles.find((s) => s.userId === staff.id);
+
+    // Group chat between all employees and boss ('sthread-group')
+    if (input.threadId === 'sthread-group') {
+      const senderLabel =
+        staff.role === 'boss'
+          ? staff.fullName
+          : sp?.publicAlias
+            ? `${staff.fullName} (${sp.publicAlias})`
+            : staff.fullName;
+
+      const groupMsg: StaffThreadMessage = {
+        id: `stm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        threadId: 'sthread-group',
+        senderId: staff.id,
+        senderName: senderLabel,
+        senderRole: staff.role === 'boss' ? 'boss' : 'employee',
+        body: cleanBody,
+        createdAt: nowIso
+      };
+      state.staffThreadMessages.push(groupMsg);
+      saveState(state);
+      return { ...groupMsg };
+    }
+
+    const thread = state.staffThreads.find((t) => t.id === input.threadId);
+    if (!thread) throw new Error('NOT_FOUND: Staff thread not found.');
+
+    // JR Family: Every active employee and Boss can message every other employee and Boss.
     const msg: StaffThreadMessage = {
-      id: `stm-${Date.now()}`,
+      id: `stm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       threadId: thread.id,
       senderId: staff.id,
       senderName: staff.fullName,
@@ -2309,6 +2926,82 @@ export class MockDataRepository implements DataRepository {
     const purged = beforeCount - state.stories.length;
     if (purged > 0) saveState(state);
     return purged;
+  }
+
+  async getSpinBonusStatus(caller: CallerContext): Promise<SpinBonusStatus> {
+    const state = getState();
+    const customer = assertCustomer(state, caller);
+    const todayKey = getCaliforniaDateKey();
+    const bonuses = (state.spinBonuses ?? []).filter((b) => b.customerId === customer.id);
+    const todays = bonuses.find((b) => b.dateKeyCalifornia === todayKey) ?? null;
+
+    return {
+      dateKeyCalifornia: todayKey,
+      hasSpunToday: Boolean(todays),
+      todaysSpin: todays
+        ? {
+            rewardPoints: todays.rewardPoints,
+            rewardLabel: todays.rewardLabel,
+            spunAt: todays.spunAt
+          }
+        : null,
+      history: bonuses
+        .slice()
+        .sort((a, b) => new Date(b.spunAt).getTime() - new Date(a.spunAt).getTime())
+        .slice(0, 10)
+    };
+  }
+
+  async spinDailyBonus(caller: CallerContext): Promise<SpinBonusStatus> {
+    const state = getState();
+    const customer = assertCustomer(state, caller);
+    const todayKey = getCaliforniaDateKey();
+    if (!state.spinBonuses) state.spinBonuses = [];
+
+    const existing = state.spinBonuses.find(
+      (b) => b.customerId === customer.id && b.dateKeyCalifornia === todayKey
+    );
+    if (existing) {
+      throw new Error(
+        'ALREADY_SPUN: You have already used your Daily Spin Bonus today. Resets at 12:00 AM California time.'
+      );
+    }
+
+    const WHEEL_REWARDS = [
+      { rewardPoints: 50, rewardLabel: '+50 Bonus Points' },
+      { rewardPoints: 100, rewardLabel: '+100 Bonus Points' },
+      { rewardPoints: 250, rewardLabel: '+250 Bonus Points' },
+      { rewardPoints: 500, rewardLabel: '+500 Bonus Points' },
+      { rewardPoints: 750, rewardLabel: '+750 Bonus Points' },
+      { rewardPoints: 1000, rewardLabel: '+1,000 JACKPOT Points' }
+    ];
+    const picked = WHEEL_REWARDS[Math.floor(Math.random() * WHEEL_REWARDS.length)]!;
+    const nowIso = new Date().toISOString();
+
+    const record = {
+      id: `spin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      customerId: customer.id,
+      dateKeyCalifornia: todayKey,
+      rewardPoints: picked.rewardPoints,
+      rewardLabel: picked.rewardLabel,
+      spunAt: nowIso
+    };
+    state.spinBonuses.unshift(record);
+
+    state.notifications.unshift({
+      id: `notif-${Date.now()}-spin-${customer.id}`,
+      recipientId: customer.id,
+      type: 'spin_bonus',
+      title: `Daily Spin Bonus Won: ${picked.rewardLabel}`,
+      body: `You won ${picked.rewardLabel} for ${todayKey} (California Time). Next spin resets at 12:00 AM PT.`,
+      link: '/home',
+      payload: { rewardPoints: picked.rewardPoints, dateKeyCalifornia: todayKey },
+      readAt: null,
+      createdAt: nowIso
+    });
+
+    saveState(state);
+    return this.getSpinBonusStatus(caller);
   }
 
   async listNotifications(caller: CallerContext): Promise<AppNotification[]> {

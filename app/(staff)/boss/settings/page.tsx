@@ -6,7 +6,10 @@ import { getDataRepository } from '@/lib/data';
 export default async function BossSettingsPage() {
   const { caller } = await requireActiveSession(['boss']);
   const repo = getDataRepository();
-  const settings = await repo.getAppSettings(caller);
+  const [settings, profiles] = await Promise.all([
+    repo.getAppSettings(caller),
+    repo.listAllProfiles(caller)
+  ]);
 
-  return <BossSettingsClient settings={settings} />;
+  return <BossSettingsClient settings={settings} profiles={profiles} />;
 }

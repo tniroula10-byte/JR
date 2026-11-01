@@ -22,6 +22,7 @@ import {
   Inbox,
   Layers,
   Lock,
+  LogOut,
   Megaphone,
   MessageSquare,
   Package,
@@ -34,7 +35,7 @@ import {
   Users,
   User
 } from 'lucide-react';
-import { switchMockPersonaAction } from '@/actions';
+import { signOutAction } from '@/actions';
 import { Badge, Button } from '@/components/ui/primitives';
 import type { Profile } from '@/lib/data/types';
 import { cn } from '@/lib/utils';
@@ -49,23 +50,16 @@ export interface NavItem {
 
 const CUSTOMER_NAV: NavItem[] = [
   { href: '/home', label: 'Home', shortLabel: 'Home', icon: Home },
-  { href: '/products', label: 'Catalog', shortLabel: 'Catalog', icon: Package },
-  { href: '/offers', label: 'My Offers', shortLabel: 'Offers', icon: Coins },
-  { href: '/chat', label: 'Support Chat', shortLabel: 'Chat', icon: MessageSquare },
-  { href: '/tickets', label: 'Support Tickets', shortLabel: 'Tickets', icon: TicketIcon },
-  { href: '/stories', label: '24h Stories', shortLabel: 'Stories', icon: Sparkles },
-  { href: '/announcements', label: 'Announcements', shortLabel: 'News', icon: Megaphone },
-  { href: '/notifications', label: 'Notifications', shortLabel: 'Alerts', icon: Bell },
-  { href: '/profile', label: 'My Profile', shortLabel: 'Profile', icon: User }
+  { href: '/chat', label: 'Chat', shortLabel: 'Chat', icon: MessageSquare },
+  { href: '/tickets', label: 'Raise ticket (Boka)', shortLabel: 'Raise ticket', icon: TicketIcon },
+  { href: '/profile', label: 'My profile', shortLabel: 'My profile', icon: User }
 ];
 
 const EMPLOYEE_NAV: NavItem[] = [
   { href: '/employee/dashboard', label: 'My Dashboard', shortLabel: 'Desk', icon: Home },
   { href: '/employee/inbox', label: 'Customer Inbox', shortLabel: 'Inbox', icon: Inbox },
   { href: '/employee/tickets', label: 'Support Tickets', shortLabel: 'Tickets', icon: TicketIcon },
-  { href: '/employee/offers', label: 'Price Offers', shortLabel: 'Offers', icon: Coins },
-  { href: '/employee/boss-chat', label: 'Boss Threads', shortLabel: 'Boss', icon: Lock },
-  { href: '/employee/announcements', label: 'Staff Channel', shortLabel: 'Channel', icon: Megaphone },
+  { href: '/employee/boss-chat', label: 'JR Family', shortLabel: 'JR Family', icon: Users },
   { href: '/employee/performance', label: 'My Performance', shortLabel: 'Metrics', icon: Activity },
   { href: '/employee/invite-customer', label: 'Invite Customer', shortLabel: 'Invite', icon: UserPlus }
 ];
@@ -77,22 +71,12 @@ const BOSS_NAV: NavItem[] = [
   { href: '/boss/analytics', label: 'Staff Analytics & CSV', shortLabel: 'Analytics', icon: FileSpreadsheet },
   { href: '/boss/customers', label: 'Customers & Invites', shortLabel: 'Customers', icon: Users },
   { href: '/boss/employees', label: 'Employee Management', shortLabel: 'Staff', icon: UserCheck },
-  { href: '/boss/threads', label: 'Internal Boss Threads', shortLabel: 'Threads', icon: Briefcase },
+  { href: '/boss/threads', label: 'JR Family', shortLabel: 'JR Family', icon: Briefcase },
   { href: '/boss/products', label: 'Products Catalog', shortLabel: 'Products', icon: Package },
   { href: '/boss/stories', label: '24h Stories Manager', shortLabel: 'Stories', icon: Sparkles },
   { href: '/boss/announcements', label: 'Announcements Hub', shortLabel: 'Announce', icon: Megaphone },
-  { href: '/boss/settings', label: 'System Settings', shortLabel: 'Settings', icon: Settings },
+  { href: '/boss/settings', label: 'Settings', shortLabel: 'Settings', icon: Settings },
   { href: '/boss/audit', label: 'Immutable Audit Log', shortLabel: 'Audit', icon: BookOpen }
-];
-
-const PERSONA_OPTIONS = [
-  { id: 'cust-1', label: 'Customer 1: Aarav Mehta', homeHref: '/home' },
-  { id: 'cust-2', label: 'Customer 2: Kabir Sharma', homeHref: '/home' },
-  { id: 'emp-1', label: 'Employee 1: Vikram (Maverick)', homeHref: '/employee/dashboard' },
-  { id: 'emp-2', label: 'Employee 2: Ananya (Valkyrie)', homeHref: '/employee/dashboard' },
-  { id: 'emp-3', label: 'Employee 3: Rohan (Ghost)', homeHref: '/employee/dashboard' },
-  { id: 'emp-4', label: 'Employee 4: Priya (Phoenix)', homeHref: '/employee/dashboard' },
-  { id: 'boss-1', label: 'Boss: Col. Rajesh Rathore', homeHref: '/boss/dashboard' }
 ];
 
 export function AppShell({
@@ -106,7 +90,7 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [switching, setSwitching] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [swReady, setSwReady] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -128,15 +112,14 @@ export function AppShell({
     }
   }, []);
 
-  async function handlePersonaChange(newUserId: string) {
-    setSwitching(true);
+  async function handleSignOut() {
+    setSigningOut(true);
     try {
-      await switchMockPersonaAction(newUserId);
-      const target = PERSONA_OPTIONS.find((p) => p.id === newUserId);
-      router.push(target?.homeHref ?? '/home');
+      await signOutAction();
+      router.push('/login');
       router.refresh();
     } finally {
-      setSwitching(false);
+      setSigningOut(false);
     }
   }
 
@@ -184,25 +167,6 @@ export function AppShell({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Persona Switcher for Mock Mode Verification */}
-            <label htmlFor="persona-switcher" className="sr-only">
-              Switch Active Role Persona
-            </label>
-            <select
-              id="persona-switcher"
-              aria-label="Switch Active Role Persona"
-              disabled={switching}
-              value={profile.id}
-              onChange={(e) => handlePersonaChange(e.target.value)}
-              className="h-9 max-w-[155px] sm:max-w-[230px] rounded-xl bg-midnight-800 border border-violet-500/35 px-2.5 text-xs text-slate-100 focus:border-violet-400"
-            >
-              {PERSONA_OPTIONS.map((opt) => (
-                <option key={opt.id} value={opt.id}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-
             {swReady ? (
               <span
                 title="PWA Service Worker Active (Static Shell Only)"
@@ -225,6 +189,18 @@ export function AppShell({
                 </span>
               ) : null}
             </Link>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              className="px-2.5"
+              disabled={signingOut}
+              onClick={handleSignOut}
+              aria-label="Sign Out"
+            >
+              <LogOut className="h-4 w-4" aria-hidden="true" />
+              <span className="hidden sm:inline text-[11px]">Sign Out</span>
+            </Button>
 
             <Button
               variant="secondary"
@@ -312,12 +288,15 @@ export function AppShell({
           </nav>
 
           <div className="mt-6 border-t border-slate-800/80 pt-4">
-            <Link
-              href="/login"
-              className="flex items-center justify-center rounded-xl border border-slate-800 bg-midnight-800 px-3 py-2 text-xs font-medium text-slate-300 hover:border-violet-500/40 hover:text-white"
+            <button
+              type="button"
+              disabled={signingOut}
+              onClick={handleSignOut}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-800 bg-midnight-800 px-3 py-2 text-xs font-medium text-slate-300 hover:border-violet-500/40 hover:text-white"
             >
-              Switch / Sign In Page
-            </Link>
+              <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>{signingOut ? 'Signing Out...' : 'Sign Out'}</span>
+            </button>
           </div>
         </aside>
 

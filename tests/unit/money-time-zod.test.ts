@@ -10,41 +10,41 @@ import {
   UpdateCustomerProfileSchema
 } from '@/lib/validation/schemas';
 
-describe('Money & Indian Digit Grouping (Decision 11)', () => {
-  it('formats integer paise into Indian Rupees (₹1,50,000)', () => {
-    expect(formatPaiseToINR(15000000)).toBe('₹1,50,000');
-    expect(formatPaiseToINR(4200000)).toBe('₹42,000');
-    expect(formatPaiseToINR(100)).toBe('₹1');
-    expect(formatPaiseToINR(150050)).toBe('₹1,500.50');
+describe('Money & US Dollar Formatting', () => {
+  it('formats integer cents into US Dollars ($)', () => {
+    expect(formatPaiseToINR(15000)).toBe('$150');
+    expect(formatPaiseToINR(420000)).toBe('$4,200');
+    expect(formatPaiseToINR(100)).toBe('$1');
+    expect(formatPaiseToINR(150050)).toBe('$1,500.50');
   });
 
-  it('rejects non-integer paise values', () => {
+  it('rejects non-integer paise/cents values', () => {
     expect(() => formatPaiseToINR(10.5)).toThrow();
     expect(() => formatPaiseToINR(NaN)).toThrow();
   });
 
-  it('parses rupee strings and numbers into exact integer paise', () => {
-    expect(parseRupeesToPaise('1,50,000')).toBe(15000000);
+  it('parses dollar strings and numbers into exact integer cents', () => {
+    expect(parseRupeesToPaise('1,500')).toBe(150000);
     expect(parseRupeesToPaise(38000)).toBe(3800000);
     expect(parseRupeesToPaise('99.50')).toBe(9950);
   });
 
-  it('rejects zero, negative, or malformed rupee inputs', () => {
+  it('rejects zero, negative, or malformed dollar inputs', () => {
     expect(() => parseRupeesToPaise('0')).toThrow();
     expect(() => parseRupeesToPaise('-500')).toThrow();
     expect(() => parseRupeesToPaise('abc')).toThrow();
     expect(() => parseRupeesToPaise('12.345')).toThrow();
   });
 
-  it('formats game points with Indian digit grouping', () => {
-    expect(formatPointsQty(150000)).toBe('1,50,000 PTS');
+  it('formats game points with US digit grouping', () => {
+    expect(formatPointsQty(150000)).toBe('150,000 PTS');
   });
 });
 
-describe('Time & IST Formatting (Decision 11)', () => {
-  it('formats UTC ISO timestamps in Asia/Kolkata (IST)', () => {
+describe('Time & US Pacific Time (California) Formatting', () => {
+  it('formats UTC ISO timestamps in America/Los_Angeles (PT)', () => {
     const formatted = formatIST('2026-10-28T00:00:00.000Z');
-    expect(formatted).toContain('IST');
+    expect(formatted).toContain('PT');
     expect(formatted).toContain('2026');
   });
 

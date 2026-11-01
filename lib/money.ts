@@ -1,61 +1,61 @@
 /**
  * Money Utilities (`lib/money.ts`)
- * Decision 11: Money is stored as integer paise and shown in rupees with Indian digit grouping (e.g. ₹1,50,000).
+ * Money is stored as integer cents and displayed in US Dollars ($) with US digit grouping (e.g. $150,000).
  */
 
-const inrFormatterWhole = new Intl.NumberFormat('en-IN', {
+const usdFormatterWhole = new Intl.NumberFormat('en-US', {
   style: 'currency',
-  currency: 'INR',
+  currency: 'USD',
   minimumFractionDigits: 0,
   maximumFractionDigits: 0
 });
 
-const inrFormatterDecimal = new Intl.NumberFormat('en-IN', {
+const usdFormatterDecimal = new Intl.NumberFormat('en-US', {
   style: 'currency',
-  currency: 'INR',
+  currency: 'USD',
   minimumFractionDigits: 2,
   maximumFractionDigits: 2
 });
 
 /**
- * Formats integer paise into Indian Rupee string with en-IN digit grouping.
- * Example: 15000000 -> "₹1,50,000"
- * Example: 150050 -> "₹1,500.50"
+ * Formats integer cents into US Dollar string with en-US digit grouping.
+ * Example: 15000000 -> "$150,000"
+ * Example: 150050 -> "$1,500.50"
  */
-export function formatPaiseToINR(paise: number): string {
-  if (!Number.isFinite(paise) || !Number.isInteger(paise)) {
-    throw new Error(`Invalid paise amount: must be a safe integer, got ${paise}`);
+export function formatPaiseToINR(cents: number): string {
+  if (!Number.isFinite(cents) || !Number.isInteger(cents)) {
+    throw new Error(`Invalid cents amount: must be a safe integer, got ${cents}`);
   }
-  const rupees = paise / 100;
-  if (paise % 100 === 0) {
-    return inrFormatterWhole.format(rupees);
+  const dollars = cents / 100;
+  if (cents % 100 === 0) {
+    return usdFormatterWhole.format(dollars);
   }
-  return inrFormatterDecimal.format(rupees);
+  return usdFormatterDecimal.format(dollars);
 }
 
 /**
- * Converts a user-entered rupee amount (number or string) to exact integer paise.
+ * Converts a user-entered dollar amount (number or string) to exact integer cents.
  * Rejects negative, zero, NaN, or >2 decimal places.
  */
-export function parseRupeesToPaise(rupeesInput: string | number): number {
-  const str = typeof rupeesInput === 'number' ? String(rupeesInput) : rupeesInput.trim().replace(/,/g, '');
+export function parseRupeesToPaise(dollarsInput: string | number): number {
+  const str = typeof dollarsInput === 'number' ? String(dollarsInput) : dollarsInput.trim().replace(/[$,]/g, '');
   if (!/^\d+(\.\d{1,2})?$/.test(str)) {
-    throw new Error(`Invalid rupee input: "${rupeesInput}"`);
+    throw new Error(`Invalid dollar input: "${dollarsInput}"`);
   }
   const num = Number(str);
   if (!Number.isFinite(num) || num <= 0) {
-    throw new Error(`Rupee amount must be positive: "${rupeesInput}"`);
+    throw new Error(`Dollar amount must be positive: "${dollarsInput}"`);
   }
-  const paise = Math.round(num * 100);
-  if (!Number.isSafeInteger(paise) || paise <= 0) {
-    throw new Error(`Paise conversion out of safe integer bounds: ${paise}`);
+  const cents = Math.round(num * 100);
+  if (!Number.isSafeInteger(cents) || cents <= 0) {
+    throw new Error(`Cents conversion out of safe integer bounds: ${cents}`);
   }
-  return paise;
+  return cents;
 }
 
 /**
- * Formats game points quantity with Indian grouping (e.g., 50,000 PTS).
+ * Formats game points quantity with US grouping (e.g., 50,000 PTS).
  */
 export function formatPointsQty(points: number): string {
-  return `${new Intl.NumberFormat('en-IN').format(points)} PTS`;
+  return `${new Intl.NumberFormat('en-US').format(points)} PTS`;
 }
