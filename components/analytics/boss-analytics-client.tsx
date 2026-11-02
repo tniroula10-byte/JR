@@ -65,7 +65,7 @@ export function BossAnalyticsClient({
             <span>Staff Performance Analytics & Side-by-Side Comparison</span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-400">
-            Computed dynamically from append-only <code>activity_events</code> and <code>ticket_events</code>.
+            Response times, tickets and offers handled by each employee.
           </p>
         </div>
 

@@ -240,7 +240,7 @@ export function BossEmployeesClient({
                     }
                     className="h-4 w-4 rounded border-slate-700 bg-midnight-950 text-violet-600"
                   />
-                  <span>Customer Selectable for Tickets (<code>customer_selectable</code>)</span>
+                  <span>Customer Selectable for Tickets</span>
                 </label>
 
                 <label className="flex items-center gap-2.5 cursor-pointer">
@@ -255,7 +255,7 @@ export function BossEmployeesClient({
                     }
                     className="h-4 w-4 rounded border-slate-700 bg-midnight-950 text-violet-600"
                   />
-                  <span>Accepts Ticket Assignments (<code>accepts_tickets</code>)</span>
+                  <span>Accepts Ticket Assignments</span>
                 </label>
 
                 <label className="flex items-center gap-2.5 cursor-pointer">
@@ -270,7 +270,7 @@ export function BossEmployeesClient({
                     }
                     className="h-4 w-4 rounded border-slate-700 bg-midnight-950 text-violet-600"
                   />
-                  <span>Can Manage Products (<code>can_manage_products</code>)</span>
+                  <span>Can Manage Products</span>
                 </label>
 
                 <label className="flex items-center gap-2.5 cursor-pointer">
@@ -285,7 +285,7 @@ export function BossEmployeesClient({
                     }
                     className="h-4 w-4 rounded border-slate-700 bg-midnight-950 text-violet-600"
                   />
-                  <span>Can Publish 24h Stories (<code>can_publish_stories</code>)</span>
+                  <span>Can Publish 24h Stories</span>
                 </label>
 
                 <label className="flex items-center gap-2.5 cursor-pointer">
@@ -300,7 +300,7 @@ export function BossEmployeesClient({
                     }
                     className="h-4 w-4 rounded border-slate-700 bg-midnight-950 text-violet-600"
                   />
-                  <span>Can Post Customer Announcements (<code>can_post_customer_announcements</code>)</span>
+                  <span>Can Post Customer Announcements</span>
                 </label>
               </div>
 

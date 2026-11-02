@@ -17,6 +17,9 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 export const MOCK_SESSION_COOKIE = 'jr_mock_user_id';
 
 export async function getCurrentProfile(): Promise<Profile | null> {
+  // Read cookies first on every path so Next.js always renders per request and never
+  // prerenders (and caches) a signed-in page at build time.
+  const cookieStore = await cookies();
   const repo = getDataRepository();
 
   if (hasLiveSupabaseKeys()) {
@@ -33,7 +36,6 @@ export async function getCurrentProfile(): Promise<Profile | null> {
     return null;
   }
 
-  const cookieStore = await cookies();
   const mockUserId = cookieStore.get(MOCK_SESSION_COOKIE)?.value;
   if (!mockUserId || mockUserId === 'anon' || mockUserId === 'none') {
     return null;

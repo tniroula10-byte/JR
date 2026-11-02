@@ -18,31 +18,28 @@ export function PerformanceDefinitionsPanel() {
         <div className="rounded-xl bg-midnight-950/70 p-3 border border-slate-800/80">
           <p className="font-bold text-white">1. Messages Sent (Chat & Ticket Replies)</p>
           <p className="mt-1 text-slate-400">
-            Count of <code className="text-violet-300">staff_chat_reply</code> and{' '}
-            <code className="text-violet-300">staff_ticket_reply</code> events in{' '}
-            <code>activity_events</code> by that employee, reported separately.
+            Number of chat replies and ticket replies sent by the employee, shown separately.
           </p>
         </div>
 
         <div className="rounded-xl bg-midnight-950/70 p-3 border border-slate-800/80">
           <p className="font-bold text-white">2. First Response Time — Chat (Avg / Median / P90)</p>
           <p className="mt-1 text-slate-400">
-            Elapsed calendar time from a customer message that arrives while the conversation is{' '}
-            <code>awaiting_staff = true</code> to the first staff reply. Credited to the employee who sent that reply.
+            Time from a customer message that is waiting for staff to the first staff reply. Credited to the employee who sent that reply.
           </p>
         </div>
 
         <div className="rounded-xl bg-midnight-950/70 p-3 border border-slate-800/80">
           <p className="font-bold text-white">3. First Response Time — Ticket (Avg / Median / P90)</p>
           <p className="mt-1 text-slate-400">
-            Elapsed time from <code>tickets.created_at</code> to the first staff reply on that ticket. Credited to the replier.
+            Time from when the ticket was created to the first staff reply on that ticket. Credited to the replier.
           </p>
         </div>
 
         <div className="rounded-xl bg-midnight-950/70 p-3 border border-slate-800/80">
           <p className="font-bold text-white">4. Ticket Resolution Time (Avg / Median)</p>
           <p className="mt-1 text-slate-400">
-            Elapsed time from <code>tickets.created_at</code> to the most recent resolution. Credited to the employee assigned at the moment of resolution.
+            Time from when the ticket was created to its most recent resolution. Credited to the employee assigned at the moment of resolution.
           </p>
         </div>
 

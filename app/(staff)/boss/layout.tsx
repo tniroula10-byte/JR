@@ -7,6 +7,9 @@ import { AppShell } from '@/components/shared/app-shell';
 import { requireActiveSession } from '@/lib/auth/session';
 import { getDataRepository } from '@/lib/data';
 
+// Per-user pages must never be prerendered or cached
+export const dynamic = 'force-dynamic';
+
 export default async function BossLayout({
   children
 }: {

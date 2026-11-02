@@ -79,7 +79,7 @@ export function BossProductsClient({ products }: { products: Product[] }) {
           <span>Products & Game-Points Catalog Manager</span>
         </h1>
         <p className="text-xs sm:text-sm text-slate-400">
-          Manage <code>available</code>, <code>sold_out</code>, and <code>hidden</code> packages. Hidden products are strictly unreachable by customers at the RLS/repository boundary.
+          Add and edit packages. Hidden products are never shown to customers.
         </p>
       </div>
 

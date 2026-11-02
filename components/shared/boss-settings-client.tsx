@@ -497,7 +497,7 @@ export function BossSettingsClient({
         <form onSubmit={handleSaveSystemSettings} className="space-y-4">
           <div>
             <label htmlFor="setting-inbox-scope" className="block text-xs font-semibold text-white mb-1">
-              Employee Inbox Scope (<code>employee_inbox_scope</code>)
+              Employee Inbox Scope
             </label>
             <select
               id="setting-inbox-scope"
@@ -506,10 +506,10 @@ export function BossSettingsClient({
               className="w-full h-10 rounded-xl bg-midnight-950 border border-slate-700 px-3 text-xs text-slate-100"
             >
               <option value="all">
-                all (Default — Every employee can read and reply in every customer conversation)
+                All conversations (default) — every employee can read and reply to every customer
               </option>
               <option value="assigned_only">
-                assigned_only (Strict — Employee sees only conversations Assigned to them)
+                Assigned only — employees see only conversations assigned to them
               </option>
             </select>
           </div>
@@ -523,7 +523,7 @@ export function BossSettingsClient({
                 className="h-4 w-4 rounded border-slate-700 bg-midnight-950"
               />
               <span>
-                Allow Customers to Request an Employee on Ticket Creation (<code>customer_can_pick_employee</code>)
+                Allow customers to request an employee when creating a ticket
               </span>
             </label>
           </div>
@@ -531,7 +531,7 @@ export function BossSettingsClient({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label htmlFor="setting-autoclose" className="block text-xs font-semibold text-white mb-1">
-                Ticket Auto-Close Days (<code>ticket_auto_close_days</code>)
+                Auto-close resolved tickets after (days)
               </label>
               <Input
                 id="setting-autoclose"

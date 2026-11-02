@@ -26,7 +26,7 @@ export default async function EmployeePerformancePage() {
             <span>My Performance Statistics ({profile.fullName})</span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-400">
-            Computed dynamically from append-only <code>activity_events</code> and <code>ticket_events</code>. Employees can only view their own statistics.
+            Only you can see your own statistics.
           </p>
         </div>
         {m ? <Badge tone="cyan">Public Alias: {m.publicAlias}</Badge> : null}

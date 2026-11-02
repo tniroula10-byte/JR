@@ -40,10 +40,16 @@ export function StoryViewerClient({ stories }: { stories: Story[] }) {
 
   if (stories.length === 0 || !activeStory) {
     return (
-      <EmptyState
-        title="No live 24-hour stories right now"
-        description="Stories automatically expire after 24 hours. Check back soon for flash drops."
-      />
+      <div className="space-y-5">
+        <h1 className="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-2">
+          <Sparkles className="h-5 w-5 text-violet-400" aria-hidden="true" />
+          <span>Stories</span>
+        </h1>
+        <EmptyState
+          title="No live 24-hour stories right now"
+          description="Stories automatically expire after 24 hours. Check back soon for flash drops."
+        />
+      </div>
     );
   }
 
