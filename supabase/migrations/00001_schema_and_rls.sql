@@ -441,20 +441,6 @@ CREATE INDEX IF NOT EXISTS story_views_customer_idx ON public.story_views (custo
 ALTER TABLE public.story_views ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.story_views FORCE ROW LEVEL SECURITY;
 
--- 2.24 spin_bonuses (12:00 AM California time daily spin bonus)
-CREATE TABLE IF NOT EXISTS public.spin_bonuses (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  customer_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
-  date_key_california text NOT NULL,
-  reward_points integer NOT NULL CHECK (reward_points > 0),
-  reward_label text NOT NULL,
-  spun_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT spin_bonuses_unique_daily UNIQUE (customer_id, date_key_california)
-);
-CREATE INDEX IF NOT EXISTS spin_bonuses_customer_date_idx ON public.spin_bonuses (customer_id, spun_at DESC);
-ALTER TABLE public.spin_bonuses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.spin_bonuses FORCE ROW LEVEL SECURITY;
-
 -- 2.25 notifications
 CREATE TABLE IF NOT EXISTS public.notifications (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1029,17 +1015,6 @@ FOR INSERT WITH CHECK (
   )
 );
 
--- 5.23 spin_bonuses (Customer reads & inserts own daily spin; staff can read all)
-CREATE POLICY spin_bonuses_select_policy ON public.spin_bonuses
-FOR SELECT USING (
-  public.is_active() AND (public.is_staff() OR customer_id = auth.uid())
-);
-
-CREATE POLICY spin_bonuses_insert_own_policy ON public.spin_bonuses
-FOR INSERT WITH CHECK (
-  public.is_customer() AND customer_id = auth.uid()
-);
-
 -- 5.24 notifications & push_subscriptions (Own rows only)
 CREATE POLICY notifications_own_policy ON public.notifications
 FOR ALL USING (public.is_active() AND recipient_id = auth.uid())
@@ -1522,51 +1497,3 @@ JOIN public.staff_profiles sp ON sp.user_id = p.id
 LEFT JOIN public.activity_events ae ON ae.actor_id = p.id
 WHERE p.role = 'employee'
 GROUP BY p.id, p.full_name, sp.public_alias;
-
--- ----------------------------------------------------------------------------
--- 8. PRIVATE STORAGE BUCKETS & STORAGE RLS POLICIES
--- ----------------------------------------------------------------------------
-
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES
-  ('product-media', 'product-media', false, 5242880, ARRAY['image/jpeg', 'image/png', 'image/webp']),
-  ('story-media', 'story-media', false, 15728640, ARRAY['image/jpeg', 'image/png', 'image/webp', 'video/mp4']),
-  ('avatars', 'avatars', false, 5242880, ARRAY['image/jpeg', 'image/png', 'image/webp'])
-ON CONFLICT (id) DO UPDATE
-SET public = false,
-    file_size_limit = EXCLUDED.file_size_limit,
-    allowed_mime_types = EXCLUDED.allowed_mime_types;
-
-CREATE POLICY product_media_read_active ON storage.objects
-FOR SELECT USING (
-  bucket_id = 'product-media' AND public.is_active()
-);
-
-CREATE POLICY product_media_write_staff ON storage.objects
-FOR INSERT WITH CHECK (
-  bucket_id = 'product-media' AND public.has_staff_flag('can_manage_products')
-);
-
-CREATE POLICY story_media_read_active ON storage.objects
-FOR SELECT USING (
-  bucket_id = 'story-media' AND public.is_active()
-);
-
-CREATE POLICY story_media_write_staff ON storage.objects
-FOR INSERT WITH CHECK (
-  bucket_id = 'story-media' AND public.has_staff_flag('can_publish_stories')
-);
-
-CREATE POLICY avatars_read_own_or_staff ON storage.objects
-FOR SELECT USING (
-  bucket_id = 'avatars'
-  AND public.is_active()
-  AND (public.is_staff() OR (storage.foldername(name))[1] = auth.uid()::text)
-);
-
-CREATE POLICY avatars_write_own ON storage.objects
-FOR INSERT WITH CHECK (
-  bucket_id = 'avatars'
-  AND public.is_active()
-  AND (storage.foldername(name))[1] = auth.uid()::text
-);

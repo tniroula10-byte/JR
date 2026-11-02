@@ -2,9 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'John Rambo — Virtual Game Points Exchange',
-  description:
-    'Invitation-only mobile-first PWA for virtual game points catalog, private support chat, and tracked tickets.',
+  title: 'John Rambo',
+  description: 'John Rambo',
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,

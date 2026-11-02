@@ -74,7 +74,7 @@ export default async function BossMasterDashboardPage() {
               </Badge>
             </div>
             <h1 className="mt-2 text-xl sm:text-2xl font-extrabold text-white">
-              Master Syndicate Command Center
+              Dashboard
             </h1>
             <p className="mt-1 text-xs sm:text-sm text-slate-300">
               Full oversight of {activeCustomers.length} active customers, {activeEmployees.length} specialists, real-time attribution, negotiations, and append-only audit logs.

@@ -66,7 +66,7 @@ export default async function EmployeeDashboardPage() {
               </Badge>
             </div>
             <h1 className="mt-2 text-xl sm:text-2xl font-extrabold text-white">
-              {profile.fullName} — Specialist Desk
+              {profile.fullName}
             </h1>
           </div>
           <div className="flex flex-wrap gap-2">

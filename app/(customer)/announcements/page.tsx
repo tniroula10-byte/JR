@@ -15,7 +15,7 @@ export default async function CustomerAnnouncementsPage() {
       <div>
         <h1 className="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-2">
           <Megaphone className="h-5 w-5 text-violet-400" aria-hidden="true" />
-          <span>Syndicate Announcements</span>
+          <span>Announcements</span>
         </h1>
         <p className="text-xs sm:text-sm text-slate-400">
           Official restock notices, dispatch windows, and points exchange updates.

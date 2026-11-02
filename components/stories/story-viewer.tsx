@@ -53,7 +53,7 @@ export function StoryViewerClient({ stories }: { stories: Story[] }) {
         <div>
           <h1 className="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-violet-400" aria-hidden="true" />
-            <span>24-Hour Syndicate Stories</span>
+            <span>Stories</span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-400">
             Press and hold (or click Pause) to hold any slide. Expired stories vanish automatically.

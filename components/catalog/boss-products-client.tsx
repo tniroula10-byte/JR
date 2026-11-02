@@ -175,7 +175,7 @@ export function BossProductsClient({ products }: { products: Product[] }) {
             >
               <option value="available">Available (Customer Visible & Offerable)</option>
               <option value="sold_out">Sold Out (Staff Only)</option>
-              <option value="hidden">Hidden (Strictly Blocked from Customer API/RLS)</option>
+              <option value="hidden">Hidden</option>
             </select>
           </div>
 

@@ -24,7 +24,7 @@ import {
   loginWithPasswordAction,
   verifyEmailOtpAndSetPasswordAction
 } from '@/actions';
-import { Badge, Button, Card, Input } from '@/components/ui/primitives';
+import { Button, Card, Input } from '@/components/ui/primitives';
 
 function LoginContent() {
   const router = useRouter();
@@ -117,15 +117,9 @@ function LoginContent() {
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-600/20 border border-violet-500/40 shadow-violet-glow">
             <Shield className="h-7 w-7 text-violet-300" aria-hidden="true" />
           </div>
-          <Badge tone="emerald" className="mt-4">
-            AUTHORIZED ACCESS ONLY
-          </Badge>
-          <h1 className="mt-2 text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
+          <h1 className="mt-4 text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
             John Rambo
           </h1>
-          <p className="mt-1 text-sm text-slate-400">
-            US Game Points Exchange • Secure Credential Authentication
-          </p>
         </div>
 
         <Card className="p-6 space-y-5">
@@ -296,10 +290,6 @@ function LoginContent() {
               </Button>
             </form>
           )}
-
-          <p className="text-[11px] text-slate-400 text-center">
-            Private platform — unauthorized access is strictly prohibited. Employee credentials are issued directly by BOKA.
-          </p>
         </Card>
       </div>
     </div>

@@ -2,10 +2,9 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'John Rambo — Virtual Game Points Syndicate',
+    name: 'John Rambo',
     short_name: 'John Rambo',
-    description:
-      'Invitation-only mobile-first PWA for virtual game points catalog, rupee offer negotiation, private support chat, and tracked tickets.',
+    description: 'John Rambo',
     start_url: '/home',
     display: 'standalone',
     background_color: '#070913',

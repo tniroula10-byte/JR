@@ -189,7 +189,7 @@ export function BossAnnouncementsClient({
                 <Input
                   id="cust-ann-title"
                   required
-                  placeholder="e.g. Valorant 25,000 VP Syndicate Drop Live"
+                  placeholder="e.g. Valorant 25,000 VP now available"
                   value={custTitle}
                   onChange={(e) => setCustTitle(e.target.value)}
                 />
