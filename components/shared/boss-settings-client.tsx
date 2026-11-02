@@ -359,7 +359,7 @@ export function BossSettingsClient({
               required
               value={employeeUsername}
               onChange={(e) => setEmployeeUsername(e.target.value)}
-              placeholder="e.g. GUZ, NOX, BSTURN, ANKY"
+              placeholder="e.g. GUZ, NOX, BSTURN"
             />
           </div>
 

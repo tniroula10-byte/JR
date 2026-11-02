@@ -5,7 +5,6 @@
  * - Employee 1: GUZ (`emp-1`)
  * - Employee 2: NOX (`emp-2`)
  * - Employee 3: BSTURN (`emp-3`)
- * - Employee 4: ANKY (`emp-4`)
  * All demo stories, offers, tickets, messages, and announcements removed.
  * US Time (California PT) and US Dollars ($).
  */
@@ -163,19 +162,6 @@ export function createInitialMockState(): MockDatabaseState {
       invitedBy: 'boss-1',
       createdAt: hoursAgo(630),
       lastSeenAt: hoursAgo(1.2)
-    },
-    {
-      id: 'emp-4',
-      role: 'employee',
-      status: 'active',
-      username: 'ANKY',
-      fullName: 'ANKY',
-      email: 'anky@johnrambo.us',
-      phone: '+13105550014',
-      avatarPath: null,
-      invitedBy: 'boss-1',
-      createdAt: hoursAgo(620),
-      lastSeenAt: hoursAgo(0.8)
     }
   ];
 
@@ -222,17 +208,6 @@ export function createInitialMockState(): MockDatabaseState {
       canPublishStories: false,
       canPostCustomerAnnouncements: false,
       createdAt: hoursAgo(630),
-      updatedAt: hoursAgo(24)
-    },
-    {
-      userId: 'emp-4',
-      publicAlias: 'ANKY',
-      customerSelectable: true,
-      acceptsTickets: true,
-      canManageProducts: true,
-      canPublishStories: false,
-      canPostCustomerAnnouncements: true,
-      createdAt: hoursAgo(620),
       updatedAt: hoursAgo(24)
     }
   ];
@@ -413,15 +388,6 @@ export function createInitialMockState(): MockDatabaseState {
       lastMessageAt: null,
       lastMessagePreview: null,
       createdAt: hoursAgo(630)
-    },
-    {
-      id: 'sthread-4',
-      employeeId: 'emp-4',
-      employeeName: 'ANKY',
-      employeeAlias: 'ANKY',
-      lastMessageAt: null,
-      lastMessagePreview: null,
-      createdAt: hoursAgo(620)
     }
   ];
 
@@ -451,14 +417,13 @@ export function createInitialMockState(): MockDatabaseState {
     complaintChatRooms: [],
     complaintChatMessages: [],
     customerPasswords: {
-      'boss-1': 'Bokasuri10@',
-      'emp-1': 'chotabhim',
-      'emp-2': 'NOX',
-      'emp-3': 'BSTURN',
-      'emp-4': 'ANKY',
-      'cust-1': 'initialPassword123',
-      'cust-2': 'Member20@',
-      'cust-3': 'Customer10@'
+      ...(process.env.SEED_BOSS_PASSWORD ? { 'boss-1': process.env.SEED_BOSS_PASSWORD } : {}),
+      ...(process.env.SEED_EMP1_PASSWORD ? { 'emp-1': process.env.SEED_EMP1_PASSWORD } : {}),
+      ...(process.env.SEED_EMP2_PASSWORD ? { 'emp-2': process.env.SEED_EMP2_PASSWORD } : {}),
+      ...(process.env.SEED_EMP3_PASSWORD ? { 'emp-3': process.env.SEED_EMP3_PASSWORD } : {}),
+      ...(process.env.SEED_CUST1_PASSWORD ? { 'cust-1': process.env.SEED_CUST1_PASSWORD } : {}),
+      ...(process.env.SEED_CUST2_PASSWORD ? { 'cust-2': process.env.SEED_CUST2_PASSWORD } : {}),
+      ...(process.env.SEED_CUST3_PASSWORD ? { 'cust-3': process.env.SEED_CUST3_PASSWORD } : {})
     },
     sentEmails: [],
     spinBonuses: [],

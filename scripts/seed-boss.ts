@@ -4,13 +4,15 @@
  * and creates the single boss. A partial unique index guarantees there is only one boss.
  */
 
+import 'server-only';
 import { hasLiveSupabaseKeys } from '../lib/data';
 import { MockDataRepository } from '../lib/data/mock';
+import { createSupabaseAdminClient } from '../lib/supabase/admin';
 
 async function main() {
-  const bossEmail = (process.env.BOSS_EMAIL || 'boss@johnrambo.in').trim().toLowerCase();
-  const bossName = (process.env.BOSS_FULL_NAME || 'Col. Rajesh Rathore (Boss)').trim();
-  const bossPhone = (process.env.BOSS_PHONE || '+919800000001').trim();
+  const bossEmail = (process.env.BOSS_EMAIL || 'boka@johnrambo.us').trim().toLowerCase();
+  const bossName = (process.env.BOSS_FULL_NAME || 'BOKA').trim();
+  const bossPhone = (process.env.BOSS_PHONE || '+13105550001').trim();
 
   if (!hasLiveSupabaseKeys()) {
     const repo = new MockDataRepository();
@@ -21,12 +23,7 @@ async function main() {
     return;
   }
 
-  const { createClient } = await import('@supabase/supabase-js');
-  const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  );
+  const supabaseAdmin = createSupabaseAdminClient();
 
   const { data: existingBoss } = await supabaseAdmin
     .from('profiles')
@@ -62,7 +59,7 @@ async function main() {
 
   await supabaseAdmin.from('staff_profiles').insert({
     user_id: userId,
-    public_alias: 'Command',
+    public_alias: 'BOKA',
     customer_selectable: false,
     accepts_tickets: true,
     can_manage_products: true,

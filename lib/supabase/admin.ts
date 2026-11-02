@@ -21,3 +21,54 @@ export function createSupabaseAdminClient() {
     }
   });
 }
+
+export async function syncUserToSupabaseAuth(input: {
+  email: string;
+  password?: string;
+  username?: string;
+  fullName?: string;
+  role?: string;
+}): Promise<void> {
+  try {
+    const admin = createSupabaseAdminClient();
+    const { data: listData } = await admin.auth.admin.listUsers();
+    const existing = listData?.users?.find(
+      (u) => u.email?.toLowerCase() === input.email.trim().toLowerCase()
+    );
+    const metadata = {
+      ...(existing?.user_metadata ?? {}),
+      ...(input.username ? { username: input.username } : {}),
+      ...(input.fullName ? { full_name: input.fullName } : {}),
+      ...(input.role ? { role: input.role } : {})
+    };
+    if (existing) {
+      await admin.auth.admin.updateUserById(existing.id, {
+        ...(input.password ? { password: input.password } : {}),
+        email_confirm: true,
+        user_metadata: metadata
+      });
+    } else {
+      await admin.auth.admin.createUser({
+        email: input.email.trim().toLowerCase(),
+        ...(input.password ? { password: input.password } : {}),
+        email_confirm: true,
+        user_metadata: metadata
+      });
+    }
+  } catch {
+    // Graceful no-op when running in unit tests or offline
+  }
+}
+
+export async function syncStateToSupabaseStorage(state: unknown): Promise<void> {
+  try {
+    const admin = createSupabaseAdminClient();
+    const payload = JSON.stringify(state, null, 2);
+    await admin.storage.from('jr-live-db').upload('state.json', payload, {
+      contentType: 'application/json',
+      upsert: true
+    });
+  } catch {
+    // Graceful no-op when running in unit tests or offline
+  }
+}

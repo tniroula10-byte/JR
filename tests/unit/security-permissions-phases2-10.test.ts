@@ -267,7 +267,7 @@ describe('Comprehensive Security, Permission Matrix & Phase 2-10 Self-Checks', (
 
     // Employee 1 (GUZ) can read all threads and message every other employee and Boss (BOKA)
     const threads = await repo.listStaffThreads(emp1);
-    expect(threads.length).toBe(5);
+    expect(threads.length).toBe(4);
 
     const ownPost = await repo.sendStaffThreadMessage(emp1, {
       threadId: 'sthread-1',
@@ -581,43 +581,62 @@ describe('Comprehensive Security, Permission Matrix & Phase 2-10 Self-Checks', (
     expect(rejectLog?.afterMeta?.approvedBy).toBe('boss-1');
   });
 
-  it('enforces seeded Boss & Employee credentials, blocks employee email OTP, and allows BOKA to change Boss/Employee/Customer passwords', async () => {
-    // 1. Verify Boss login with BOKA10 / Bokasuri10@
+  it('enforces Boss & Employee credentials, blocks employee email OTP, and allows BOKA to change Boss/Employee/Customer passwords', async () => {
+    // 1. Set and verify Boss login with BOKA10
+    await repo.adminSetUserPassword(boss, {
+      targetUserId: 'boss-1',
+      newPassword: 'TestBossInitPass1@',
+      newUsername: 'BOKA10'
+    });
     const bossLogin = await repo.authenticateWithPassword({
       email: 'BOKA10',
-      password: 'Bokasuri10@'
+      password: 'TestBossInitPass1@'
     });
     expect(bossLogin.ok).toBe(true);
     expect(bossLogin.profile?.id).toBe('boss-1');
 
-    // 2. Verify Employee 1..4 logins (GUZ, NOX, BSTURN, ANKY)
+    // 2. Set and verify Employee 1..3 logins (GUZ, NOX, BSTURN) and that ANKY does not exist
+    await repo.adminSetUserPassword(boss, {
+      targetUserId: 'emp-1',
+      newPassword: 'TestGuzPass1@',
+      newUsername: 'GUZ'
+    });
     const guzLogin = await repo.authenticateWithPassword({
       email: 'GUZ',
-      password: 'chotabhim'
+      password: 'TestGuzPass1@'
     });
     expect(guzLogin.ok).toBe(true);
     expect(guzLogin.profile?.id).toBe('emp-1');
 
+    await repo.adminSetUserPassword(boss, {
+      targetUserId: 'emp-2',
+      newPassword: 'TestNoxPass1@',
+      newUsername: 'NOX'
+    });
     const noxLogin = await repo.authenticateWithPassword({
       email: 'NOX',
-      password: 'NOX'
+      password: 'TestNoxPass1@'
     });
     expect(noxLogin.ok).toBe(true);
     expect(noxLogin.profile?.id).toBe('emp-2');
 
+    await repo.adminSetUserPassword(boss, {
+      targetUserId: 'emp-3',
+      newPassword: 'TestBsturnPass1@',
+      newUsername: 'BSTURN'
+    });
     const bsturnLogin = await repo.authenticateWithPassword({
       email: 'BSTURN',
-      password: 'BSTURN'
+      password: 'TestBsturnPass1@'
     });
     expect(bsturnLogin.ok).toBe(true);
     expect(bsturnLogin.profile?.id).toBe('emp-3');
 
     const ankyLogin = await repo.authenticateWithPassword({
       email: 'ANKY',
-      password: 'ANKY'
+      password: 'TestAnkyPass1@'
     });
-    expect(ankyLogin.ok).toBe(true);
-    expect(ankyLogin.profile?.id).toBe('emp-4');
+    expect(ankyLogin.ok).toBe(false);
 
     // 3. Employee first-time login cannot use email OTP
     await expect(

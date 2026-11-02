@@ -34,12 +34,16 @@ FOR INSERT WITH CHECK (
   bucket_id = 'story-media' AND public.has_staff_flag('can_publish_stories')
 );
 
-CREATE POLICY avatars_read_active ON storage.objects
+CREATE POLICY avatars_read_own_or_staff ON storage.objects
 FOR SELECT USING (
-  bucket_id = 'avatars' AND public.is_active()
+  bucket_id = 'avatars'
+  AND public.is_active()
+  AND (public.is_staff() OR (storage.foldername(name))[1] = auth.uid()::text)
 );
 
 CREATE POLICY avatars_write_own ON storage.objects
 FOR INSERT WITH CHECK (
-  bucket_id = 'avatars' AND public.is_active()
+  bucket_id = 'avatars'
+  AND public.is_active()
+  AND (storage.foldername(name))[1] = auth.uid()::text
 );

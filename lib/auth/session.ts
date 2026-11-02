@@ -2,6 +2,7 @@
  * Server Session & Role Guard Resolution (`lib/auth/session.ts`)
  * Supports both Mock Persona Sessions (`jr_mock_user_id` cookie) and Live Supabase Auth.
  */
+import 'server-only';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getDataRepository, hasLiveSupabaseKeys, type CallerContext, type Profile } from '@/lib/data';
@@ -13,12 +14,18 @@ export async function getCurrentProfile(): Promise<Profile | null> {
   const repo = getDataRepository();
 
   if (hasLiveSupabaseKeys()) {
-    const supabase = await createSupabaseServerClient();
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
-    if (!user) return null;
-    return repo.getProfileById(user.id);
+    try {
+      const supabase = await createSupabaseServerClient();
+      const {
+        data: { user }
+      } = await supabase.auth.getUser();
+      if (user) {
+        const sbProfile = await repo.getProfileById(user.id);
+        if (sbProfile) return sbProfile;
+      }
+    } catch {
+      // Fall back to session cookie when using username/password credentials
+    }
   }
 
   const cookieStore = await cookies();

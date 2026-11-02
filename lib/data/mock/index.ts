@@ -71,7 +71,10 @@ function getState(): MockDatabaseState {
     try {
       const raw = fs.readFileSync(STATE_FILE_PATH, 'utf8');
       const parsed = JSON.parse(raw) as MockDatabaseState;
-      if (parsed.profiles?.[0]?.username === 'BOKA10' && parsed.customerPasswords?.['cust-3']) {
+      if (
+        parsed.profiles?.[0]?.username === 'BOKA10' &&
+        !parsed.profiles.some((p) => p.id === 'emp-4')
+      ) {
         globalMockHolder.__jrMockState = parsed;
         return globalMockHolder.__jrMockState;
       }
@@ -82,7 +85,7 @@ function getState(): MockDatabaseState {
   if (
     !globalMockHolder.__jrMockState ||
     globalMockHolder.__jrMockState.profiles?.[0]?.username !== 'BOKA10' ||
-    !globalMockHolder.__jrMockState.customerPasswords?.['cust-3']
+    globalMockHolder.__jrMockState.profiles.some((p) => p.id === 'emp-4')
   ) {
     globalMockHolder.__jrMockState = createInitialMockState();
   }
@@ -97,6 +100,15 @@ function saveState(state: MockDatabaseState): void {
     } catch {
       // Ignore write errors in read-only environments
     }
+  }
+  if (
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.startsWith('https://') &&
+    process.env.NODE_ENV !== 'test' &&
+    !process.env.VITEST
+  ) {
+    import('@/lib/supabase/admin')
+      .then(({ syncStateToSupabaseStorage }) => syncStateToSupabaseStorage(state))
+      .catch(() => {});
   }
 }
 

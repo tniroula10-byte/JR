@@ -55,47 +55,61 @@ export class SupabaseDataRepository implements DataRepository {
   private fallback = new MockDataRepository();
 
   async getProfileById(userId: string): Promise<Profile | null> {
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle();
-    if (error || !data) return null;
-    return {
-      id: data.id,
-      role: data.role,
-      status: data.status,
-      fullName: data.full_name,
-      email: data.email,
-      phone: data.phone,
-      avatarPath: data.avatar_path,
-      invitedBy: data.invited_by,
-      createdAt: data.created_at,
-      lastSeenAt: data.last_seen_at
-    };
+    try {
+      const supabase = await createSupabaseServerClient();
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+      if (!error && data) {
+        return {
+          id: data.id,
+          role: data.role,
+          status: data.status,
+          username: data.username ?? undefined,
+          fullName: data.full_name,
+          email: data.email,
+          phone: data.phone,
+          avatarPath: data.avatar_path,
+          invitedBy: data.invited_by,
+          createdAt: data.created_at,
+          lastSeenAt: data.last_seen_at
+        };
+      }
+    } catch {
+      // Fallback below
+    }
+    return this.fallback.getProfileById(userId);
   }
 
   async getProfileByEmail(email: string): Promise<Profile | null> {
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .ilike('email', email.trim())
-      .maybeSingle();
-    if (error || !data) return null;
-    return {
-      id: data.id,
-      role: data.role,
-      status: data.status,
-      fullName: data.full_name,
-      email: data.email,
-      phone: data.phone,
-      avatarPath: data.avatar_path,
-      invitedBy: data.invited_by,
-      createdAt: data.created_at,
-      lastSeenAt: data.last_seen_at
-    };
+    try {
+      const supabase = await createSupabaseServerClient();
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .ilike('email', email.trim())
+        .maybeSingle();
+      if (!error && data) {
+        return {
+          id: data.id,
+          role: data.role,
+          status: data.status,
+          username: data.username ?? undefined,
+          fullName: data.full_name,
+          email: data.email,
+          phone: data.phone,
+          avatarPath: data.avatar_path,
+          invitedBy: data.invited_by,
+          createdAt: data.created_at,
+          lastSeenAt: data.last_seen_at
+        };
+      }
+    } catch {
+      // Fallback below
+    }
+    return this.fallback.getProfileByEmail(email);
   }
 
   async listAllProfiles(caller: CallerContext): Promise<Profile[]> {
@@ -107,13 +121,19 @@ export class SupabaseDataRepository implements DataRepository {
   }
 
   async getSelectableStaffAliases(caller: CallerContext): Promise<SelectableStaffAlias[]> {
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase.rpc('get_selectable_staff_aliases');
-    if (error || !data) return this.fallback.getSelectableStaffAliases(caller);
-    return (data as Array<{ staff_id: string; public_alias: string }>).map((r) => ({
-      staffId: r.staff_id,
-      publicAlias: r.public_alias
-    }));
+    try {
+      const supabase = await createSupabaseServerClient();
+      const { data, error } = await supabase.rpc('get_selectable_staff_aliases');
+      if (!error && data) {
+        return (data as Array<{ staff_id: string; public_alias: string }>).map((r) => ({
+          staffId: r.staff_id,
+          publicAlias: r.public_alias
+        }));
+      }
+    } catch {
+      // Fallback below
+    }
+    return this.fallback.getSelectableStaffAliases(caller);
   }
 
   async listReportableStaffAliases(caller: CallerContext): Promise<SelectableStaffAlias[]> {
@@ -165,7 +185,20 @@ export class SupabaseDataRepository implements DataRepository {
       newUsername?: string;
     }
   ): Promise<Profile> {
-    return this.fallback.adminSetUserPassword(caller, input);
+    const updated = await this.fallback.adminSetUserPassword(caller, input);
+    try {
+      const { syncUserToSupabaseAuth } = await import('@/lib/supabase/admin');
+      await syncUserToSupabaseAuth({
+        email: updated.email,
+        password: input.newPassword.trim(),
+        username: updated.username,
+        fullName: updated.fullName,
+        role: updated.role
+      });
+    } catch {
+      // Ignore in test environments
+    }
+    return updated;
   }
 
   async inviteUser(
@@ -180,7 +213,20 @@ export class SupabaseDataRepository implements DataRepository {
       initialPassword?: string;
     }
   ): Promise<{ invitation: Invitation; profile: Profile }> {
-    return this.fallback.inviteUser(caller, input);
+    const res = await this.fallback.inviteUser(caller, input);
+    try {
+      const { syncUserToSupabaseAuth } = await import('@/lib/supabase/admin');
+      await syncUserToSupabaseAuth({
+        email: res.profile.email,
+        password: input.initialPassword?.trim(),
+        username: res.profile.username,
+        fullName: res.profile.fullName,
+        role: res.profile.role
+      });
+    } catch {
+      // Ignore in test environments
+    }
+    return res;
   }
 
   async listInvitations(caller: CallerContext): Promise<Invitation[]> {
@@ -293,32 +339,40 @@ export class SupabaseDataRepository implements DataRepository {
     caller: CallerContext,
     input: { conversationId: string; body: string; clientMsgId: string }
   ): Promise<CustomerMessageView> {
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase.rpc('send_customer_message', {
-      p_conversation_id: input.conversationId,
-      p_body: input.body,
-      p_client_msg_id: input.clientMsgId
-    });
-    if (error || !data) {
-      return this.fallback.sendCustomerMessage(caller, input);
+    try {
+      const supabase = await createSupabaseServerClient();
+      const { data, error } = await supabase.rpc('send_customer_message', {
+        p_conversation_id: input.conversationId,
+        p_body: input.body,
+        p_client_msg_id: input.clientMsgId
+      });
+      if (!error && data) {
+        return data as CustomerMessageView;
+      }
+    } catch {
+      // Fallback below
     }
-    return data as CustomerMessageView;
+    return this.fallback.sendCustomerMessage(caller, input);
   }
 
   async sendStaffMessage(
     caller: CallerContext,
     input: { conversationId: string; body: string; clientMsgId: string }
   ): Promise<StaffMessageView> {
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase.rpc('send_staff_message', {
-      p_conversation_id: input.conversationId,
-      p_body: input.body,
-      p_client_msg_id: input.clientMsgId
-    });
-    if (error || !data) {
-      return this.fallback.sendStaffMessage(caller, input);
+    try {
+      const supabase = await createSupabaseServerClient();
+      const { data, error } = await supabase.rpc('send_staff_message', {
+        p_conversation_id: input.conversationId,
+        p_body: input.body,
+        p_client_msg_id: input.clientMsgId
+      });
+      if (!error && data) {
+        return data as StaffMessageView;
+      }
+    } catch {
+      // Fallback below
     }
-    return data as StaffMessageView;
+    return this.fallback.sendStaffMessage(caller, input);
   }
 
   async reassignConversationHandler(
@@ -345,16 +399,20 @@ export class SupabaseDataRepository implements DataRepository {
     caller: CallerContext,
     input: { productId: string; offeredPricePaise: number; clientMsgId: string }
   ): Promise<{ offer: Offer; message: CustomerMessageView }> {
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase.rpc('submit_offer', {
-      p_product_id: input.productId,
-      p_amount_paise: input.offeredPricePaise,
-      p_client_msg_id: input.clientMsgId
-    });
-    if (error || !data) {
-      return this.fallback.submitOffer(caller, input);
+    try {
+      const supabase = await createSupabaseServerClient();
+      const { data, error } = await supabase.rpc('submit_offer', {
+        p_product_id: input.productId,
+        p_amount_paise: input.offeredPricePaise,
+        p_client_msg_id: input.clientMsgId
+      });
+      if (!error && data) {
+        return data as { offer: Offer; message: CustomerMessageView };
+      }
+    } catch {
+      // Fallback below
     }
-    return data as { offer: Offer; message: CustomerMessageView };
+    return this.fallback.submitOffer(caller, input);
   }
 
   async respondToOffer(

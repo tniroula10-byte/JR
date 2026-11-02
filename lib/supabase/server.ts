@@ -2,6 +2,7 @@
  * Server Component / Server Action Supabase Client (`lib/supabase/server.ts`)
  * Uses `@supabase/ssr` with Next.js cookies.
  */
+import 'server-only';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
