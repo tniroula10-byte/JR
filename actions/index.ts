@@ -742,18 +742,3 @@ export async function sendComplaintChatMessageAction(rawInput: {
     };
   }
 }
-
-export async function spinDailyBonusAction() {
-  const { caller } = await requireActiveSession(['customer']);
-  try {
-    const repo = getDataRepository();
-    const status = await repo.spinDailyBonus(caller);
-    revalidatePath('/home');
-    return { ok: true, data: status };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : 'Daily spin bonus failed'
-    };
-  }
-}

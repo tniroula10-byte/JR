@@ -64,14 +64,6 @@ export interface RawTicketAttributionRecord {
   createdAt: string;
 }
 
-export interface SpinBonusRecord {
-  id: string;
-  customerId: string;
-  dateKeyCalifornia: string;
-  rewardPoints: number;
-  rewardLabel: string;
-  spunAt: string;
-}
 
 export interface MockDatabaseState {
   profiles: Profile[];
@@ -92,7 +84,6 @@ export interface MockDatabaseState {
   complaintChatMessages: ComplaintChatMessage[];
   customerPasswords: Record<string, string>;
   sentEmails?: OutboundEmailNotice[];
-  spinBonuses?: SpinBonusRecord[];
   staffThreads: StaffThread[];
   staffThreadMessages: StaffThreadMessage[];
   staffAnnouncements: StaffAnnouncement[];
@@ -426,7 +417,6 @@ export function createInitialMockState(): MockDatabaseState {
       ...(process.env.SEED_CUST3_PASSWORD ? { 'cust-3': process.env.SEED_CUST3_PASSWORD } : {})
     },
     sentEmails: [],
-    spinBonuses: [],
     staffThreads,
     staffThreadMessages: [],
     staffAnnouncements: [],

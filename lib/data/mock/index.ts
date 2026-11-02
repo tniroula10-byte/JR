@@ -14,7 +14,6 @@ import {
 import { calculateEmployeeMetrics } from '@/lib/analytics/metrics';
 import { formatPaiseToINR } from '@/lib/money';
 import { checkRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
-import { getCaliforniaDateKey } from '@/lib/time';
 import { validateTicketTransition } from '@/lib/tickets/state-machine';
 import { validateBasicPasswordFormat } from '@/lib/validation/schemas';
 import type {
@@ -44,7 +43,6 @@ import type {
   Profile,
   PushSubscriptionRecord,
   SelectableStaffAlias,
-  SpinBonusStatus,
   StaffAnnouncement,
   StaffAnnouncementAck,
   StaffMessageView,
@@ -2891,82 +2889,6 @@ export class MockDataRepository implements DataRepository {
     const purged = beforeCount - state.stories.length;
     if (purged > 0) saveState(state);
     return purged;
-  }
-
-  async getSpinBonusStatus(caller: CallerContext): Promise<SpinBonusStatus> {
-    const state = getState();
-    const customer = assertCustomer(state, caller);
-    const todayKey = getCaliforniaDateKey();
-    const bonuses = (state.spinBonuses ?? []).filter((b) => b.customerId === customer.id);
-    const todays = bonuses.find((b) => b.dateKeyCalifornia === todayKey) ?? null;
-
-    return {
-      dateKeyCalifornia: todayKey,
-      hasSpunToday: Boolean(todays),
-      todaysSpin: todays
-        ? {
-            rewardPoints: todays.rewardPoints,
-            rewardLabel: todays.rewardLabel,
-            spunAt: todays.spunAt
-          }
-        : null,
-      history: bonuses
-        .slice()
-        .sort((a, b) => new Date(b.spunAt).getTime() - new Date(a.spunAt).getTime())
-        .slice(0, 10)
-    };
-  }
-
-  async spinDailyBonus(caller: CallerContext): Promise<SpinBonusStatus> {
-    const state = getState();
-    const customer = assertCustomer(state, caller);
-    const todayKey = getCaliforniaDateKey();
-    if (!state.spinBonuses) state.spinBonuses = [];
-
-    const existing = state.spinBonuses.find(
-      (b) => b.customerId === customer.id && b.dateKeyCalifornia === todayKey
-    );
-    if (existing) {
-      throw new Error(
-        'ALREADY_SPUN: You have already used your Daily Spin Bonus today. Resets at 12:00 AM California time.'
-      );
-    }
-
-    const WHEEL_REWARDS = [
-      { rewardPoints: 50, rewardLabel: '+50 Bonus Points' },
-      { rewardPoints: 100, rewardLabel: '+100 Bonus Points' },
-      { rewardPoints: 250, rewardLabel: '+250 Bonus Points' },
-      { rewardPoints: 500, rewardLabel: '+500 Bonus Points' },
-      { rewardPoints: 750, rewardLabel: '+750 Bonus Points' },
-      { rewardPoints: 1000, rewardLabel: '+1,000 JACKPOT Points' }
-    ];
-    const picked = WHEEL_REWARDS[Math.floor(Math.random() * WHEEL_REWARDS.length)]!;
-    const nowIso = new Date().toISOString();
-
-    const record = {
-      id: `spin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      customerId: customer.id,
-      dateKeyCalifornia: todayKey,
-      rewardPoints: picked.rewardPoints,
-      rewardLabel: picked.rewardLabel,
-      spunAt: nowIso
-    };
-    state.spinBonuses.unshift(record);
-
-    state.notifications.unshift({
-      id: `notif-${Date.now()}-spin-${customer.id}`,
-      recipientId: customer.id,
-      type: 'spin_bonus',
-      title: `Daily Spin Bonus Won: ${picked.rewardLabel}`,
-      body: `You won ${picked.rewardLabel} for ${todayKey} (California Time). Next spin resets at 12:00 AM PT.`,
-      link: '/home',
-      payload: { rewardPoints: picked.rewardPoints, dateKeyCalifornia: todayKey },
-      readAt: null,
-      createdAt: nowIso
-    });
-
-    saveState(state);
-    return this.getSpinBonusStatus(caller);
   }
 
   async listNotifications(caller: CallerContext): Promise<AppNotification[]> {

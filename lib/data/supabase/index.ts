@@ -36,7 +36,6 @@ import type {
   Profile,
   PushSubscriptionRecord,
   SelectableStaffAlias,
-  SpinBonusStatus,
   StaffAnnouncement,
   StaffAnnouncementAck,
   StaffMessageView,
@@ -731,14 +730,6 @@ export class SupabaseDataRepository implements DataRepository {
 
   async purgeExpiredStories(nowIso?: string): Promise<number> {
     return this.fallback.purgeExpiredStories(nowIso);
-  }
-
-  async getSpinBonusStatus(caller: CallerContext): Promise<SpinBonusStatus> {
-    return this.fallback.getSpinBonusStatus(caller);
-  }
-
-  async spinDailyBonus(caller: CallerContext): Promise<SpinBonusStatus> {
-    return this.fallback.spinDailyBonus(caller);
   }
 
   async listNotifications(caller: CallerContext): Promise<AppNotification[]> {

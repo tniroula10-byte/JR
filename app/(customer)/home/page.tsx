@@ -7,14 +7,13 @@ export default async function CustomerHomePage() {
   const { profile, caller } = await requireActiveSession(['customer']);
   const repo = getDataRepository();
 
-  const [stories, announcements, products, conv, notifications, spinBonusStatus] =
+  const [stories, announcements, products, conv, notifications] =
     await Promise.all([
       repo.listStories(caller),
       repo.listCustomerAnnouncements(caller),
       repo.listProducts(caller),
       repo.getCustomerConversation(caller),
-      repo.listNotifications(caller),
-      repo.getSpinBonusStatus(caller)
+      repo.listNotifications(caller)
     ]);
 
   const initialMessages = conv
@@ -30,7 +29,6 @@ export default async function CustomerHomePage() {
       conversation={conv}
       initialMessages={initialMessages}
       notifications={notifications}
-      initialSpinBonus={spinBonusStatus}
     />
   );
 }

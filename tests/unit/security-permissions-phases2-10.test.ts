@@ -306,13 +306,6 @@ describe('Comprehensive Security, Permission Matrix & Phase 2-10 Self-Checks', (
     expect(ack.employeeId).toBe('emp-3');
     expect(ack.acknowledgedAt).toBeTruthy();
 
-    // Daily Spin Bonus: customer can spin once per California day
-    const initialSpin = await repo.getSpinBonusStatus(custA);
-    expect(initialSpin.hasSpunToday).toBe(false);
-    const afterSpin = await repo.spinDailyBonus(custA);
-    expect(afterSpin.hasSpunToday).toBe(true);
-    expect(afterSpin.todaysSpin?.rewardPoints).toBeGreaterThan(0);
-    await expect(repo.spinDailyBonus(custA)).rejects.toThrow(/ALREADY_SPUN/);
   });
 
   it('Phase 8, 9 & 10: enforces analytics scoping, CSV audit log, 24h story expiry, and Web Push', async () => {

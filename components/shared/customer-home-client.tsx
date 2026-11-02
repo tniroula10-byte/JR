@@ -6,9 +6,8 @@
  * 1. Top of page: 24-Hour Stories (shown ONLY if Boss BOKA has posted a story)
  * 2. Welcome Back Card (no Raise Ticket button, no promotional subtitle)
  * 3. Announcements (just after Welcome Back)
- * 4. Daily Spin Bonus (resets every 12:00 AM California time / America/Los_Angeles)
- * 5. Expandable Chat Box for messaging the Admin
- * 6. Game Points Catalog (USD $) & Notifications
+ * 4. Expandable Chat Box for messaging the Admin
+ * 5. Game Points Catalog (USD $) & Notifications
  */
 
 import React, { useEffect, useState } from 'react';
@@ -19,22 +18,18 @@ import {
   CheckCheck,
   ChevronDown,
   ChevronUp,
-  Clock,
-  Gift,
   Maximize2,
   Megaphone,
   MessageSquare,
   Minimize2,
   Pin,
-  RotateCw,
   Send,
   Shield,
   Sparkles
 } from 'lucide-react';
 import {
   markAllNotificationsReadAction,
-  sendCustomerMessageAction,
-  spinDailyBonusAction
+  sendCustomerMessageAction
 } from '@/actions';
 import { CustomerCatalogClient } from '@/components/catalog/customer-catalog';
 import { StoryViewerClient } from '@/components/stories/story-viewer';
@@ -46,22 +41,13 @@ import type {
   CustomerMessageView,
   Product,
   Profile,
-  SpinBonusStatus,
   Story
 } from '@/lib/data/types';
 import {
   formatIST,
-  formatISTTime,
-  getSecondsUntilCaliforniaMidnight
+  formatISTTime
 } from '@/lib/time';
 import { cn } from '@/lib/utils';
-
-function formatCountdownHMS(totalSeconds: number): string {
-  const hrs = Math.floor(totalSeconds / 3600);
-  const mins = Math.floor((totalSeconds % 3600) / 60);
-  const secs = totalSeconds % 60;
-  return `${String(hrs).padStart(2, '0')}h ${String(mins).padStart(2, '0')}m ${String(secs).padStart(2, '0')}s`;
-}
 
 export function CustomerHomeClient({
   profile,
@@ -70,8 +56,7 @@ export function CustomerHomeClient({
   products,
   conversation,
   initialMessages,
-  notifications,
-  initialSpinBonus
+  notifications
 }: {
   profile: Profile;
   stories: Story[];
@@ -80,7 +65,6 @@ export function CustomerHomeClient({
   conversation: Conversation | null;
   initialMessages: CustomerMessageView[];
   notifications: AppNotification[];
-  initialSpinBonus: SpinBonusStatus;
 }) {
   const router = useRouter();
   const [chatExpanded, setChatExpanded] = useState(true);
@@ -91,51 +75,13 @@ export function CustomerHomeClient({
   const [chatError, setChatError] = useState<string | null>(null);
   const [markingRead, setMarkingRead] = useState(false);
 
-  // Daily Spin Bonus State (Resets every 12:00 AM California Time)
-  const [spinStatus, setSpinStatus] = useState<SpinBonusStatus>(initialSpinBonus);
-  const [spinning, setSpinning] = useState(false);
-  const [spinError, setSpinError] = useState<string | null>(null);
-  const [wheelRotation, setWheelRotation] = useState(0);
-  const [secsToReset, setSecsToReset] = useState<number | null>(null);
-
   useEffect(() => {
     setMessages(initialMessages);
   }, [initialMessages]);
 
-  useEffect(() => {
-    setSpinStatus(initialSpinBonus);
-  }, [initialSpinBonus]);
-
-  useEffect(() => {
-    setSecsToReset(getSecondsUntilCaliforniaMidnight());
-    const timer = setInterval(() => {
-      setSecsToReset(getSecondsUntilCaliforniaMidnight());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
   // Show 24-hour story on top ONLY if Boss (BOKA) has posted a story
   const bossStories = stories.filter((s) => s.authorId === 'boss-1');
   const unreadNotifs = notifications.filter((n) => !n.readAt);
-
-  async function handleSpinBonus() {
-    if (spinning || spinStatus.hasSpunToday) return;
-    setSpinning(true);
-    setSpinError(null);
-    setWheelRotation((prev) => prev + 1080 + Math.floor(Math.random() * 360));
-
-    try {
-      const res = await spinDailyBonusAction();
-      if (!res.ok || !res.data) {
-        setSpinError(res.error ?? 'Unable to spin right now.');
-      } else {
-        setSpinStatus(res.data);
-        router.refresh();
-      }
-    } finally {
-      setSpinning(false);
-    }
-  }
 
   async function handleSendAdminMessage(e: React.FormEvent) {
     e.preventDefault();
@@ -306,104 +252,6 @@ export function CustomerHomeClient({
             ))}
           </div>
         )}
-      </section>
-
-      {/* 4. Daily Spin Bonus — Resets every 12:00 AM California Time (America/Los_Angeles) */}
-      <section aria-labelledby="spin-bonus-heading">
-        <Card className="p-5 sm:p-6 border-violet-500/45 bg-gradient-to-br from-midnight-800 via-midnight-900 to-midnight-950">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div className="space-y-2.5 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge tone="emerald">DAILY SPIN BONUS</Badge>
-                <Badge tone="amber">
-                  <Clock className="h-3 w-3" aria-hidden="true" />
-                  <span>Resets 12:00 AM California Time (PT)</span>
-                </Badge>
-              </div>
-              <h2
-                id="spin-bonus-heading"
-                className="text-lg sm:text-xl font-extrabold text-white flex items-center gap-2"
-              >
-                <Gift className="h-5 w-5 text-violet-400" aria-hidden="true" />
-                <span>Daily Lucky Spin Bonus</span>
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-300">
-                Spin once every day for instant bonus game points! Your daily spin automatically resets at{' '}
-                <strong className="text-white">12:00 AM California Time (PT)</strong>.
-              </p>
-              <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-slate-400">
-                <span>
-                  California Date: <strong className="font-mono text-slate-200">{spinStatus.dateKeyCalifornia}</strong>
-                </span>
-                <span>•</span>
-                <span>
-                  Next Reset In:{' '}
-                  <strong className="font-mono text-violet-300">
-                    {secsToReset !== null ? formatCountdownHMS(secsToReset) : '12:00 AM PT'}
-                  </strong>
-                </span>
-              </div>
-
-              {spinError ? (
-                <div role="alert" className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-200">
-                  {spinError}
-                </div>
-              ) : null}
-
-              {spinStatus.hasSpunToday && spinStatus.todaysSpin ? (
-                <div className="rounded-xl border border-violet-500/40 bg-violet-500/10 p-3.5 space-y-1">
-                  <p className="text-xs font-bold uppercase tracking-wider text-violet-300">
-                    Today&apos;s Bonus Claimed!
-                  </p>
-                  <p className="text-sm font-extrabold text-white">
-                    You won {spinStatus.todaysSpin.rewardLabel}
-                  </p>
-                  <p className="text-[11px] text-slate-400">
-                    Claimed at {formatIST(spinStatus.todaysSpin.spunAt)} • Come back after 12:00 AM California Time for your next spin.
-                  </p>
-                </div>
-              ) : null}
-            </div>
-
-            {/* Interactive Luxury Green & Gold Spin Wheel */}
-            <div className="flex flex-col items-center gap-3 shrink-0">
-              <div className="relative flex h-36 w-36 items-center justify-center">
-                <div
-                  style={{ transform: `rotate(${wheelRotation}deg)` }}
-                  className="flex h-32 w-32 items-center justify-center rounded-full border-4 border-violet-400/60 bg-gradient-to-tr from-midnight-950 via-violet-900/70 to-amber-500/30 shadow-violet-glow transition-transform duration-700 ease-out"
-                >
-                  <div className="flex h-20 w-20 flex-col items-center justify-center rounded-full border border-violet-400/40 bg-midnight-950 text-center px-2">
-                    <Sparkles className="h-4 w-4 text-amber-300 mb-0.5" aria-hidden="true" />
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-white">
-                      {spinStatus.hasSpunToday && spinStatus.todaysSpin
-                        ? `+${spinStatus.todaysSpin.rewardPoints}`
-                        : 'SPIN'}
-                    </span>
-                    <span className="text-[9px] text-violet-300">PTS</span>
-                  </div>
-                </div>
-              </div>
-
-              <Button
-                onClick={handleSpinBonus}
-                disabled={spinning || spinStatus.hasSpunToday}
-                className="min-w-[190px]"
-              >
-                <RotateCw
-                  className={cn('h-4 w-4', spinning ? 'animate-spin' : '')}
-                  aria-hidden="true"
-                />
-                <span>
-                  {spinning
-                    ? 'Spinning...'
-                    : spinStatus.hasSpunToday
-                      ? 'Spun Today (Resets 12 AM PT)'
-                      : 'Spin Daily Bonus Now'}
-                </span>
-              </Button>
-            </div>
-          </div>
-        </Card>
       </section>
 
       {/* 5. Expandable Chat Box for Messaging the Admin */}

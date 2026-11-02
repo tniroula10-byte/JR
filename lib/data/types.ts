@@ -354,23 +354,6 @@ export interface StoryView {
   viewedAt: string;
 }
 
-export interface SpinBonusStatus {
-  dateKeyCalifornia: string;
-  hasSpunToday: boolean;
-  todaysSpin: {
-    rewardPoints: number;
-    rewardLabel: string;
-    spunAt: string;
-  } | null;
-  history: Array<{
-    id: string;
-    dateKeyCalifornia: string;
-    rewardPoints: number;
-    rewardLabel: string;
-    spunAt: string;
-  }>;
-}
-
 export interface AppNotification {
   id: string;
   recipientId: string;
@@ -699,8 +682,6 @@ export interface DataRepository {
   ): Promise<Story>;
   recordStoryView(caller: CallerContext, storyId: string): Promise<void>;
   purgeExpiredStories(nowIso?: string): Promise<number>;
-  getSpinBonusStatus(caller: CallerContext): Promise<SpinBonusStatus>;
-  spinDailyBonus(caller: CallerContext): Promise<SpinBonusStatus>;
 
   // Notifications & Push
   listNotifications(caller: CallerContext): Promise<AppNotification[]>;
