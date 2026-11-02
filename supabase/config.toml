@@ -18,6 +18,15 @@ additional_redirect_urls = ["http://localhost:3000/callback"]
 enable_signup = false
 
 [auth.email]
-enable_signup = false
+# Email/password login stays on; public sign-up is off via [auth] enable_signup above
 double_confirm_changes = true
 enable_confirmations = true
+
+# Invites send a 6-digit code (not a link) that customers enter on /login.
+# Hosted projects need the same template under Authentication > Email Templates > Magic Link.
+[auth.email.template.magic_link]
+subject = "Your John Rambo verification code"
+content_path = "./supabase/templates/otp-code.html"
+
+[auth.rate_limit]
+email_sent = 60

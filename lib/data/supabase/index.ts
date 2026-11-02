@@ -1,13 +1,16 @@
 /**
  * Supabase Data Repository Adapter (`lib/data/supabase/index.ts`)
- * Connects `DataRepository` methods to PostgreSQL tables, views, and atomic RPCs
- * (`submit_offer`, `send_staff_message`, `send_customer_message`, `create_ticket`,
- * `assign_ticket`, `transition_ticket`, `acknowledge_staff_post`, `respond_to_offer`).
- * Falls back cleanly or throws typed errors if called without live credentials.
+ * Every method runs against PostgreSQL with the caller's own session, so RLS applies.
+ * Multi-step writes go through SECURITY DEFINER RPCs (`supabase/migrations/00003_live_data_layer.sql`).
+ * Customers read sanitized `c_*` RPCs that never contain staff ids (Decision 4).
+ * The service-role client is used only for Auth admin calls and `srv_*` functions.
+ * There is no mock fallback: errors surface instead of silently serving demo data.
  */
+import 'server-only';
+import { createClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
-import { MockDataRepository } from '@/lib/data/mock';
+import { buildPerformanceCsv, calculateEmployeeMetrics } from '@/lib/analytics/metrics';
 import { validateBasicPasswordFormat } from '@/lib/validation/schemas';
 import type {
   ActivityEvent,
@@ -39,6 +42,7 @@ import type {
   StaffAnnouncement,
   StaffAnnouncementAck,
   StaffMessageView,
+  StaffProfile,
   StaffThread,
   StaffThreadMessage,
   StaffTicketMessageView,
@@ -51,8 +55,43 @@ import type {
   UserStatus
 } from '@/lib/data/types';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped PostgREST row
-function mapProfileRow(data: any): Profile {
+/* eslint-disable @typescript-eslint/no-explicit-any -- PostgREST rows are untyped */
+type Row = Record<string, any>;
+
+const SUPPORT_NAME = 'John Rambo Support';
+const GROUP_THREAD_KEY = 'sthread-group';
+
+type ServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function fail(error: { message: string } | null): never {
+  throw new Error(error?.message ?? 'DATABASE_ERROR: Unexpected empty response.');
+}
+
+async function rpc<T = any>(
+  client: ServerClient | ReturnType<typeof createSupabaseAdminClient>,
+  fn: string,
+  args?: Record<string, unknown>
+): Promise<T> {
+  const { data, error } = await client.rpc(fn, args);
+  if (error) fail(error);
+  return data as T;
+}
+
+async function rows<T = Row>(query: PromiseLike<{ data: T[] | null; error: any }>): Promise<T[]> {
+  const { data, error } = await query;
+  if (error) fail(error);
+  return data ?? [];
+}
+
+function byId<T extends Row>(list: T[], key = 'id'): Map<string, T> {
+  return new Map(list.map((r) => [r[key] as string, r]));
+}
+
+function mapProfileRow(data: Row): Profile {
   return {
     id: data.id,
     role: data.role,
@@ -70,15 +109,224 @@ function mapProfileRow(data: any): Profile {
   };
 }
 
+function mapStaffProfile(r: Row): StaffProfile {
+  return {
+    userId: r.user_id,
+    publicAlias: r.public_alias,
+    customerSelectable: r.customer_selectable,
+    acceptsTickets: r.accepts_tickets,
+    canManageProducts: r.can_manage_products,
+    canPublishStories: r.can_publish_stories,
+    canPostCustomerAnnouncements: r.can_post_customer_announcements,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  };
+}
+
+function mapProduct(r: Row): Product {
+  return {
+    id: r.id,
+    gameName: r.game_name,
+    title: r.title,
+    pointsQty: r.points_qty,
+    description: r.description,
+    imagePath: r.image_path,
+    pricePaise: Number(r.price_paise),
+    status: r.status,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  };
+}
+
+function mapOfferCamel(o: Row): Offer {
+  return {
+    ...(o as Offer),
+    offeredPricePaise: Number(o.offeredPricePaise),
+    listedPricePaise: Number(o.listedPricePaise),
+    counterPricePaise: o.counterPricePaise === null ? null : Number(o.counterPricePaise)
+  };
+}
+
 const INVALID_CREDENTIALS: PasswordAuthResult = {
   ok: false,
   code: 'INVALID_CREDENTIALS',
   error: 'Invalid email or password.'
 };
 
+/** Directory of staff/customer names, readable by staff via RLS. */
+interface Directory {
+  profiles: Map<string, Row>;
+  aliases: Map<string, string>;
+}
+
+async function loadDirectory(supabase: ServerClient): Promise<Directory> {
+  const [profiles, staff] = await Promise.all([
+    rows(supabase.from('profiles').select('id, full_name, email, role')),
+    rows(supabase.from('staff_profiles').select('user_id, public_alias'))
+  ]);
+  return {
+    profiles: byId(profiles),
+    aliases: new Map(staff.map((s) => [s.user_id as string, s.public_alias as string]))
+  };
+}
+
+function nameOf(dir: Directory, id: string | null | undefined): string | null {
+  return id ? (dir.profiles.get(id)?.full_name ?? null) : null;
+}
+
+function aliasOf(dir: Directory, id: string | null | undefined): string | null {
+  return id ? (dir.aliases.get(id) ?? null) : null;
+}
+
+function mapStaffOffer(o: Row, dir: Directory, gameNames: Map<string, string>): Offer {
+  return {
+    id: o.id,
+    productId: o.product_id,
+    customerId: o.customer_id,
+    customerName: nameOf(dir, o.customer_id) ?? undefined,
+    conversationId: o.conversation_id,
+    offeredPricePaise: Number(o.offered_price_paise),
+    listedPricePaise: Number(o.listed_price_paise),
+    productTitle: o.product_title,
+    gameName: gameNames.get(o.product_id),
+    status: o.status,
+    counterPricePaise: o.counter_price_paise === null ? null : Number(o.counter_price_paise),
+    staffNote: o.staff_note,
+    handledBy: o.handled_by,
+    handledByName: nameOf(dir, o.handled_by),
+    createdAt: o.created_at,
+    updatedAt: o.updated_at
+  };
+}
+
+function mapStaffConversation(c: Row, dir: Directory): Conversation {
+  const customer = dir.profiles.get(c.customer_id);
+  return {
+    id: c.id,
+    customerId: c.customer_id,
+    customerName: customer?.full_name ?? 'Customer',
+    customerEmail: customer?.email ?? '',
+    handledBy: c.handled_by,
+    handledByName: nameOf(dir, c.handled_by),
+    handledByAlias: aliasOf(dir, c.handled_by),
+    awaitingStaff: c.awaiting_staff,
+    lastMessageAt: c.last_message_at,
+    lastMessagePreview: c.last_message_preview,
+    customerLastReadAt: c.customer_last_read_at,
+    staffLastReadAt: c.staff_last_read_at,
+    customerUnreadCount: c.customer_unread_count,
+    staffUnreadCount: c.staff_unread_count,
+    createdAt: c.created_at
+  };
+}
+
+function mapStaffTicket(t: Row, dir: Directory): Ticket {
+  return {
+    id: t.id,
+    ticketNo: t.ticket_no,
+    customerId: t.customer_id,
+    customerName: nameOf(dir, t.customer_id) ?? undefined,
+    subject: t.subject,
+    description: t.description,
+    category: t.category,
+    priority: t.priority,
+    status: t.status,
+    assignedEmployeeId: t.assigned_employee_id,
+    assignedEmployeeName: nameOf(dir, t.assigned_employee_id),
+    assignedEmployeeAlias: aliasOf(dir, t.assigned_employee_id),
+    requestedEmployeeId: t.requested_employee_id,
+    requestedEmployeeAlias: aliasOf(dir, t.requested_employee_id),
+    reopenCount: t.reopen_count,
+    createdAt: t.created_at,
+    firstResponseAt: t.first_response_at,
+    resolvedAt: t.resolved_at,
+    closedAt: t.closed_at
+  };
+}
+
+function mapCustomerMessage(
+  m: Row,
+  customerName: string,
+  offers: Map<string, Offer>
+): CustomerMessageView {
+  return {
+    id: m.id,
+    conversationId: m.conversation_id,
+    senderKind: m.sender_kind,
+    senderDisplayName:
+      m.sender_kind === 'staff' ? SUPPORT_NAME : m.sender_kind === 'system' ? 'System' : customerName,
+    customerSenderId: m.sender_kind === 'customer' ? m.customer_sender_id : null,
+    type: m.type,
+    body: m.body,
+    offerId: m.offer_id,
+    offerSnapshot: m.offer_id ? (offers.get(m.offer_id) ?? null) : null,
+    clientMsgId: m.client_msg_id,
+    createdAt: m.created_at
+  };
+}
+
+function mapTicketMessage(m: Row, customerName: string): CustomerTicketMessageView {
+  return {
+    id: m.id,
+    ticketId: m.ticket_id,
+    senderKind: m.sender_kind,
+    senderDisplayName:
+      m.sender_kind === 'staff' ? SUPPORT_NAME : m.sender_kind === 'system' ? 'System' : customerName,
+    customerSenderId: m.sender_kind === 'customer' ? m.customer_sender_id : null,
+    body: m.body,
+    createdAt: m.created_at
+  };
+}
+
+function inRange(iso: string, filter?: PerformanceQueryFilter): boolean {
+  const t = new Date(iso).getTime();
+  if (filter?.startDateIso && t < new Date(filter.startDateIso).getTime()) return false;
+  if (filter?.endDateIso && t > new Date(filter.endDateIso).getTime()) return false;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Repository
+// ---------------------------------------------------------------------------
+
 export class SupabaseDataRepository implements DataRepository {
   readonly mode = 'supabase' as const;
-  private fallback = new MockDataRepository();
+
+  private async groupThreadId(supabase: ServerClient): Promise<string> {
+    const { data, error } = await supabase
+      .from('staff_threads')
+      .select('id')
+      .eq('is_group', true)
+      .maybeSingle();
+    if (error || !data) fail(error ?? { message: 'NOT_FOUND: Staff group thread missing.' });
+    return data.id as string;
+  }
+
+  private async resolveThreadId(supabase: ServerClient, threadId: string): Promise<string> {
+    return threadId === GROUP_THREAD_KEY ? this.groupThreadId(supabase) : threadId;
+  }
+
+  private async customerOffersById(supabase: ServerClient): Promise<Map<string, Offer>> {
+    const list = (await rpc<Row[]>(supabase, 'c_list_offers')).map(mapOfferCamel);
+    return new Map(list.map((o) => [o.id, o]));
+  }
+
+  private async staffOffersById(
+    supabase: ServerClient,
+    dir: Directory,
+    ids: string[]
+  ): Promise<Map<string, Offer>> {
+    if (ids.length === 0) return new Map();
+    const [offers, products] = await Promise.all([
+      rows(supabase.from('offers').select('*').in('id', ids)),
+      rows(supabase.from('products').select('id, game_name'))
+    ]);
+    const games = new Map(products.map((p) => [p.id as string, p.game_name as string]));
+    return new Map(offers.map((o) => [o.id as string, mapStaffOffer(o, dir, games)]));
+  }
+
+  // ---- Auth & Profile ------------------------------------------------------
 
   // Identity lookups never fall back to mock data: a missing row means "no access".
   async getProfileById(userId: string): Promise<Profile | null> {
@@ -104,39 +352,64 @@ export class SupabaseDataRepository implements DataRepository {
     return mapProfileRow(data);
   }
 
-  async listAllProfiles(caller: CallerContext): Promise<Profile[]> {
-    return this.fallback.listAllProfiles(caller);
+  async listAllProfiles(_caller: CallerContext): Promise<Profile[]> {
+    const supabase = await createSupabaseServerClient();
+    const list = await rows(supabase.from('profiles').select('*').order('created_at'));
+    return list.map(mapProfileRow);
   }
 
-  async listEmployeesWithFlags(caller: CallerContext): Promise<EmployeeWithFlags[]> {
-    return this.fallback.listEmployeesWithFlags(caller);
+  async listEmployeesWithFlags(_caller: CallerContext): Promise<EmployeeWithFlags[]> {
+    const supabase = await createSupabaseServerClient();
+    const [profiles, staff] = await Promise.all([
+      rows(supabase.from('profiles').select('*').eq('role', 'employee').order('created_at')),
+      rows(supabase.from('staff_profiles').select('*'))
+    ]);
+    const flags = byId(staff, 'user_id');
+    return profiles
+      .filter((p) => flags.has(p.id))
+      .map((p) => ({ ...mapProfileRow(p), staffProfile: mapStaffProfile(flags.get(p.id)!) }));
   }
 
   async getSelectableStaffAliases(caller: CallerContext): Promise<SelectableStaffAlias[]> {
-    try {
-      const supabase = await createSupabaseServerClient();
-      const { data, error } = await supabase.rpc('get_selectable_staff_aliases');
-      if (!error && data) {
-        return (data as Array<{ staff_id: string; public_alias: string }>).map((r) => ({
-          staffId: r.staff_id,
-          publicAlias: r.public_alias
-        }));
-      }
-    } catch {
-      // Fallback below
+    const supabase = await createSupabaseServerClient();
+    if (caller.role === 'customer') {
+      const list = await rpc<Row[]>(supabase, 'get_selectable_staff_aliases');
+      return list.map((r) => ({ staffId: r.staff_id, publicAlias: r.public_alias }));
     }
-    return this.fallback.getSelectableStaffAliases(caller);
+    const employees = await this.listEmployeesWithFlags(caller);
+    return employees
+      .filter(
+        (e) =>
+          e.status === 'active' && e.staffProfile.customerSelectable && e.staffProfile.acceptsTickets
+      )
+      .map((e) => ({ staffId: e.id, publicAlias: e.staffProfile.publicAlias }));
   }
 
-  async listReportableStaffAliases(caller: CallerContext): Promise<SelectableStaffAlias[]> {
-    return this.fallback.listReportableStaffAliases(caller);
+  async listReportableStaffAliases(_caller: CallerContext): Promise<SelectableStaffAlias[]> {
+    const supabase = await createSupabaseServerClient();
+    const list = await rpc<Row[]>(supabase, 'list_reportable_staff_aliases');
+    return list.map((r) => ({ staffId: r.staff_id, publicAlias: r.public_alias }));
   }
 
   async updateCustomerOwnProfile(
     caller: CallerContext,
     input: { fullName: string; email: string; phone: string }
   ): Promise<Profile> {
-    return this.fallback.updateCustomerOwnProfile(caller, input);
+    const supabase = await createSupabaseServerClient();
+    const updated = await rpc<Row>(supabase, 'update_own_profile', {
+      p_full_name: input.fullName,
+      p_phone: input.phone
+    });
+
+    const newEmail = input.email.trim().toLowerCase();
+    if (newEmail && newEmail !== String(updated.email).toLowerCase()) {
+      // Supabase emails a confirmation link; profiles.email syncs once the change is confirmed
+      const { error } = await supabase.auth.updateUser({ email: newEmail });
+      if (error) {
+        throw new Error(`EMAIL_CHANGE_FAILED: ${error.message}`);
+      }
+    }
+    return mapProfileRow(updated);
   }
 
   async changeCustomerPassword(
@@ -319,27 +592,47 @@ export class SupabaseDataRepository implements DataRepository {
 
   async adminSetUserPassword(
     caller: CallerContext,
-    input: {
-      targetUserId: string;
-      newPassword: string;
-      newUsername?: string;
-    }
+    input: { targetUserId: string; newPassword: string; newUsername?: string }
   ): Promise<Profile> {
-    const updated = await this.fallback.adminSetUserPassword(caller, input);
-    try {
-      const { syncUserToSupabaseAuth } = await import('@/lib/supabase/admin');
-      await syncUserToSupabaseAuth({
-        email: updated.email,
-        password: input.newPassword.trim(),
-        username: updated.username,
-        fullName: updated.fullName,
-        role: updated.role
-      });
-    } catch {
-      // Ignore in test environments
+    const cleanPassword = input.newPassword.trim();
+    if (!cleanPassword) {
+      throw new Error('INVALID_PASSWORD: Password cannot be empty.');
     }
-    return updated;
+
+    const admin = createSupabaseAdminClient();
+    const { data: target } = await admin
+      .from('profiles')
+      .select('role')
+      .eq('id', input.targetUserId)
+      .maybeSingle();
+    if (!target) {
+      throw new Error('NOT_FOUND: Target user not found.');
+    }
+    // Basic password format is compulsory for Employees and Customers, NOT for BOKA (boss)
+    if (target.role !== 'boss') {
+      const formatCheck = validateBasicPasswordFormat(cleanPassword);
+      if (!formatCheck.valid) {
+        throw new Error(formatCheck.error);
+      }
+    }
+
+    // srv_set_username re-checks that the caller is the active Boss before anything changes
+    const updated = await rpc<Row>(admin, 'srv_set_username', {
+      p_actor: caller.userId,
+      p_target: input.targetUserId,
+      p_username: input.newUsername ?? null
+    });
+
+    const { error } = await admin.auth.admin.updateUserById(input.targetUserId, {
+      password: cleanPassword
+    });
+    if (error) {
+      throw new Error(`PASSWORD_UPDATE_FAILED: ${error.message}`);
+    }
+    return mapProfileRow(updated);
   }
+
+  // ---- Invitations & User Management ----------------------------------------
 
   async inviteUser(
     caller: CallerContext,
@@ -353,55 +646,166 @@ export class SupabaseDataRepository implements DataRepository {
       initialPassword?: string;
     }
   ): Promise<{ invitation: Invitation; profile: Profile }> {
-    const res = await this.fallback.inviteUser(caller, input);
-    try {
-      const { syncUserToSupabaseAuth } = await import('@/lib/supabase/admin');
-      await syncUserToSupabaseAuth({
-        email: res.profile.email,
-        password: input.initialPassword?.trim(),
-        username: res.profile.username,
-        fullName: res.profile.fullName,
-        role: res.profile.role
-      });
-    } catch {
-      // Ignore in test environments
+    const admin = createSupabaseAdminClient();
+    const email = input.email.trim().toLowerCase();
+    const password = input.initialPassword?.trim() || undefined;
+
+    if (password) {
+      const formatCheck = validateBasicPasswordFormat(password);
+      if (!formatCheck.valid) {
+        throw new Error(formatCheck.error);
+      }
     }
-    return res;
+
+    // Fail fast on role rules before creating an Auth user (srv_provision_invite re-checks)
+    if (caller.role === 'customer') {
+      throw new Error('FORBIDDEN: Customers cannot invite anyone.');
+    }
+    if (caller.role === 'employee' && input.intendedRole !== 'customer') {
+      throw new Error('FORBIDDEN: Employees can invite customers only (never employees or a boss).');
+    }
+
+    const { data: created, error: createError } = await admin.auth.admin.createUser({
+      email,
+      ...(password ? { password } : {}),
+      // Staff vouch for the address; customers still prove ownership with the emailed code
+      email_confirm: true
+    });
+    if (createError || !created.user) {
+      const msg = createError?.message ?? '';
+      throw new Error(
+        /already.*registered|exists/i.test(msg)
+          ? 'CONFLICT: A user with this email already exists.'
+          : `INVITE_FAILED: ${msg}`
+      );
+    }
+
+    let result: Row;
+    try {
+      result = await rpc<Row>(admin, 'srv_provision_invite', {
+        p_actor: caller.userId,
+        p_user_id: created.user.id,
+        p_email: email,
+        p_full_name: input.fullName,
+        p_phone: input.phone ?? null,
+        p_role: input.intendedRole,
+        p_public_alias: input.publicAlias ?? null,
+        p_username: input.username ?? null,
+        p_has_password: Boolean(password)
+      });
+    } catch (err) {
+      // Roll back the Auth user so a failed invite leaves nothing behind
+      await admin.auth.admin.deleteUser(created.user.id);
+      throw err;
+    }
+
+    if (!password) {
+      // Sends the 6-digit code the customer enters on "Customer OTP Setup"
+      const anon = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        { auth: { persistSession: false, autoRefreshToken: false } }
+      );
+      await anon.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
+    }
+
+    const inv = result.invitation as Row;
+    return {
+      profile: mapProfileRow(result.profile as Row),
+      invitation: {
+        id: inv.id,
+        email: inv.email,
+        intendedRole: inv.intended_role,
+        fullName: inv.full_name,
+        phone: inv.phone,
+        invitedBy: inv.invited_by,
+        invitedByName: result.invitedByName as string,
+        status: inv.status,
+        createdAt: inv.created_at,
+        expiresAt: inv.expires_at,
+        acceptedAt: inv.accepted_at
+      }
+    };
   }
 
-  async listInvitations(caller: CallerContext): Promise<Invitation[]> {
-    return this.fallback.listInvitations(caller);
+  async listInvitations(_caller: CallerContext): Promise<Invitation[]> {
+    const supabase = await createSupabaseServerClient();
+    const [invites, dir] = await Promise.all([
+      rows(supabase.from('invitations').select('*').order('created_at', { ascending: false })),
+      loadDirectory(supabase)
+    ]);
+    return invites.map((i) => ({
+      id: i.id,
+      email: i.email,
+      intendedRole: i.intended_role,
+      fullName: i.full_name,
+      phone: i.phone,
+      invitedBy: i.invited_by,
+      invitedByName: nameOf(dir, i.invited_by) ?? undefined,
+      status: i.status,
+      createdAt: i.created_at,
+      expiresAt: i.expires_at,
+      acceptedAt: i.accepted_at
+    }));
   }
 
-  async listPendingCustomers(caller: CallerContext): Promise<Profile[]> {
-    return this.fallback.listPendingCustomers(caller);
+  async listPendingCustomers(_caller: CallerContext): Promise<Profile[]> {
+    const supabase = await createSupabaseServerClient();
+    const list = await rows(
+      supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', 'customer')
+        .eq('status', 'pending_approval')
+        .order('created_at')
+    );
+    return list.map(mapProfileRow);
   }
 
   async reviewPendingUser(
-    caller: CallerContext,
-    input: {
-      targetUserId: string;
-      decision: 'approve' | 'reject';
-      note?: string;
-    }
+    _caller: CallerContext,
+    input: { targetUserId: string; decision: 'approve' | 'reject'; note?: string }
   ): Promise<{ profile: Profile; emailNotice: OutboundEmailNotice }> {
-    return this.fallback.reviewPendingUser(caller, input);
+    const supabase = await createSupabaseServerClient();
+    const res = await rpc<Row>(supabase, 'review_pending_user', {
+      p_target: input.targetUserId,
+      p_decision: input.decision,
+      p_note: input.note ?? null
+    });
+    return {
+      profile: mapProfileRow(res.profile),
+      emailNotice: res.emailNotice as OutboundEmailNotice
+    };
   }
 
-  async listSentEmails(caller: CallerContext): Promise<OutboundEmailNotice[]> {
-    return this.fallback.listSentEmails(caller);
+  async listSentEmails(_caller: CallerContext): Promise<OutboundEmailNotice[]> {
+    const supabase = await createSupabaseServerClient();
+    const list = await rows(
+      supabase.from('outbound_emails').select('*').order('sent_at', { ascending: false }).limit(200)
+    );
+    return list.map((e) => ({
+      id: e.id,
+      to: e.to_email,
+      subject: e.subject,
+      body: e.body,
+      kind: e.kind,
+      sentAt: e.sent_at
+    }));
   }
 
   async setUserStatus(
-    caller: CallerContext,
+    _caller: CallerContext,
     targetUserId: string,
     newStatus: UserStatus
   ): Promise<Profile> {
-    return this.fallback.setUserStatus(caller, targetUserId, newStatus);
+    const supabase = await createSupabaseServerClient();
+    return mapProfileRow(
+      await rpc<Row>(supabase, 'set_user_status', { p_target: targetUserId, p_status: newStatus })
+    );
   }
 
   async updateStaffFlags(
-    caller: CallerContext,
+    _caller: CallerContext,
     input: {
       employeeId: string;
       publicAlias: string;
@@ -412,30 +816,62 @@ export class SupabaseDataRepository implements DataRepository {
       canPostCustomerAnnouncements: boolean;
     }
   ): Promise<EmployeeWithFlags> {
-    return this.fallback.updateStaffFlags(caller, input);
+    const supabase = await createSupabaseServerClient();
+    const sp = await rpc<Row>(supabase, 'update_staff_flags', {
+      p_employee_id: input.employeeId,
+      p_public_alias: input.publicAlias,
+      p_customer_selectable: input.customerSelectable,
+      p_accepts_tickets: input.acceptsTickets,
+      p_can_manage_products: input.canManageProducts,
+      p_can_publish_stories: input.canPublishStories,
+      p_can_post_customer_announcements: input.canPostCustomerAnnouncements
+    });
+    const profile = await this.getProfileById(input.employeeId);
+    if (!profile) throw new Error('NOT_FOUND: Employee not found.');
+    return { ...profile, staffProfile: mapStaffProfile(sp) };
   }
 
-  async getAppSettings(caller: CallerContext): Promise<AppSettings> {
-    return this.fallback.getAppSettings(caller);
+  // ---- App Settings -----------------------------------------------------------
+
+  async getAppSettings(_caller: CallerContext): Promise<AppSettings> {
+    const supabase = await createSupabaseServerClient();
+    const settings = await rpc<AppSettings | null>(supabase, 'get_app_settings');
+    if (!settings) throw new Error('FORBIDDEN_SUSPENDED: Account is not active.');
+    return settings;
   }
 
   async updateAppSettings(
-    caller: CallerContext,
+    _caller: CallerContext,
     input: Partial<Omit<AppSettings, 'updatedBy' | 'updatedAt'>>
   ): Promise<AppSettings> {
-    return this.fallback.updateAppSettings(caller, input);
+    const supabase = await createSupabaseServerClient();
+    return rpc<AppSettings>(supabase, 'update_app_settings', { p_patch: input });
   }
 
-  async listProducts(caller: CallerContext): Promise<Product[]> {
-    return this.fallback.listProducts(caller);
+  // ---- Products -----------------------------------------------------------------
+
+  async listProducts(_caller: CallerContext): Promise<Product[]> {
+    const supabase = await createSupabaseServerClient();
+    // RLS: customers only ever receive 'available' rows
+    const list = await rows(
+      supabase.from('products').select('*').order('created_at', { ascending: false })
+    );
+    return list.map(mapProduct);
   }
 
-  async getProductById(caller: CallerContext, productId: string): Promise<Product | null> {
-    return this.fallback.getProductById(caller, productId);
+  async getProductById(_caller: CallerContext, productId: string): Promise<Product | null> {
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('id', productId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return mapProduct(data);
   }
 
   async upsertProduct(
-    caller: CallerContext,
+    _caller: CallerContext,
     input: {
       id?: string;
       gameName: string;
@@ -447,72 +883,153 @@ export class SupabaseDataRepository implements DataRepository {
       status: ProductStatus;
     }
   ): Promise<Product> {
-    return this.fallback.upsertProduct(caller, input);
+    const supabase = await createSupabaseServerClient();
+    return mapProduct(
+      await rpc<Row>(supabase, 'upsert_product', {
+        p_id: input.id ?? null,
+        p_game_name: input.gameName,
+        p_title: input.title,
+        p_points_qty: input.pointsQty,
+        p_description: input.description,
+        p_image_path: input.imagePath ?? null,
+        p_price_paise: input.pricePaise,
+        p_status: input.status
+      })
+    );
   }
 
+  // ---- Customer Chat & Attribution ---------------------------------------------
+
   async listConversations(caller: CallerContext): Promise<Conversation[]> {
-    return this.fallback.listConversations(caller);
+    const supabase = await createSupabaseServerClient();
+    if (caller.role === 'customer') {
+      const conv = await rpc<Conversation | null>(supabase, 'c_get_conversation');
+      return conv ? [conv] : [];
+    }
+    const [list, dir] = await Promise.all([
+      rows(
+        supabase
+          .from('conversations')
+          .select('*')
+          .order('last_message_at', { ascending: false, nullsFirst: false })
+      ),
+      loadDirectory(supabase)
+    ]);
+    return list.map((c) => mapStaffConversation(c, dir));
   }
 
   async getCustomerConversation(
     caller: CallerContext,
     conversationId?: string
   ): Promise<Conversation | null> {
-    return this.fallback.getCustomerConversation(caller, conversationId);
+    const supabase = await createSupabaseServerClient();
+    if (caller.role === 'customer') {
+      const conv = await rpc<Conversation | null>(supabase, 'c_get_conversation');
+      if (conv && conversationId && conv.id !== conversationId) {
+        throw new Error('FORBIDDEN: Conversation outside caller scope.');
+      }
+      return conv;
+    }
+    if (!conversationId) return null;
+    const [{ data, error }, dir] = await Promise.all([
+      supabase.from('conversations').select('*').eq('id', conversationId).maybeSingle(),
+      loadDirectory(supabase)
+    ]);
+    if (error) fail(error);
+    if (!data) throw new Error('FORBIDDEN: Conversation outside caller scope.');
+    return mapStaffConversation(data, dir);
   }
 
   async listCustomerMessages(
     caller: CallerContext,
     conversationId: string
   ): Promise<CustomerMessageView[]> {
-    return this.fallback.listCustomerMessages(caller, conversationId);
+    const supabase = await createSupabaseServerClient();
+    const messages = await rows(
+      supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at')
+    );
+
+    if (caller.role === 'customer') {
+      const [offers, me] = await Promise.all([
+        this.customerOffersById(supabase),
+        this.getProfileById(caller.userId)
+      ]);
+      return messages.map((m) => mapCustomerMessage(m, me?.fullName ?? 'Customer', offers));
+    }
+
+    const conv = await this.getCustomerConversation(caller, conversationId);
+    const dir = await loadDirectory(supabase);
+    const offers = await this.staffOffersById(
+      supabase,
+      dir,
+      messages.map((m) => m.offer_id).filter(Boolean)
+    );
+    return messages.map((m) => mapCustomerMessage(m, conv?.customerName ?? 'Customer', offers));
   }
 
   async listStaffMessages(
     caller: CallerContext,
     conversationId: string
   ): Promise<StaffMessageView[]> {
-    return this.fallback.listStaffMessages(caller, conversationId);
+    if (caller.role === 'customer') {
+      throw new Error('FORBIDDEN: Staff authority required.');
+    }
+    const supabase = await createSupabaseServerClient();
+    const base = await this.listCustomerMessages(caller, conversationId);
+    const staffIds = base.filter((m) => m.senderKind === 'staff').map((m) => m.id);
+    const [attrs, dir] = await Promise.all([
+      staffIds.length
+        ? rows(supabase.from('message_attribution').select('*').in('message_id', staffIds))
+        : Promise.resolve([] as Row[]),
+      loadDirectory(supabase)
+    ]);
+    const attrBy = byId(attrs, 'message_id');
+    return base.map((m) => {
+      const staffId = (attrBy.get(m.id)?.staff_id as string | undefined) ?? null;
+      return {
+        ...m,
+        attributedStaffId: staffId,
+        attributedStaffName: nameOf(dir, staffId),
+        attributedStaffAlias: aliasOf(dir, staffId)
+      };
+    });
   }
 
   async sendCustomerMessage(
     caller: CallerContext,
     input: { conversationId: string; body: string; clientMsgId: string }
   ): Promise<CustomerMessageView> {
-    try {
-      const supabase = await createSupabaseServerClient();
-      const { data, error } = await supabase.rpc('send_customer_message', {
-        p_conversation_id: input.conversationId,
-        p_body: input.body,
-        p_client_msg_id: input.clientMsgId
-      });
-      if (!error && data) {
-        return data as CustomerMessageView;
-      }
-    } catch {
-      // Fallback below
-    }
-    return this.fallback.sendCustomerMessage(caller, input);
+    const supabase = await createSupabaseServerClient();
+    const msg = await rpc<Row>(supabase, 'send_customer_message', {
+      p_conversation_id: input.conversationId,
+      p_body: input.body,
+      p_client_msg_id: input.clientMsgId
+    });
+    const me = await this.getProfileById(caller.userId);
+    return mapCustomerMessage(msg, me?.fullName ?? 'Customer', new Map());
   }
 
   async sendStaffMessage(
     caller: CallerContext,
     input: { conversationId: string; body: string; clientMsgId: string }
   ): Promise<StaffMessageView> {
-    try {
-      const supabase = await createSupabaseServerClient();
-      const { data, error } = await supabase.rpc('send_staff_message', {
-        p_conversation_id: input.conversationId,
-        p_body: input.body,
-        p_client_msg_id: input.clientMsgId
-      });
-      if (!error && data) {
-        return data as StaffMessageView;
-      }
-    } catch {
-      // Fallback below
-    }
-    return this.fallback.sendStaffMessage(caller, input);
+    const supabase = await createSupabaseServerClient();
+    const msg = await rpc<Row>(supabase, 'send_staff_message', {
+      p_conversation_id: input.conversationId,
+      p_body: input.body,
+      p_client_msg_id: input.clientMsgId
+    });
+    const dir = await loadDirectory(supabase);
+    return {
+      ...mapCustomerMessage(msg, '', new Map()),
+      attributedStaffId: caller.userId,
+      attributedStaffName: nameOf(dir, caller.userId),
+      attributedStaffAlias: aliasOf(dir, caller.userId)
+    };
   }
 
   async reassignConversationHandler(
@@ -520,43 +1037,73 @@ export class SupabaseDataRepository implements DataRepository {
     conversationId: string,
     employeeId: string | null
   ): Promise<Conversation> {
-    return this.fallback.reassignConversationHandler(caller, conversationId, employeeId);
+    const supabase = await createSupabaseServerClient();
+    await rpc(supabase, 'reassign_conversation', {
+      p_conversation_id: conversationId,
+      p_employee_id: employeeId
+    });
+    return (await this.getCustomerConversation(caller, conversationId))!;
   }
 
-  async markConversationRead(caller: CallerContext, conversationId: string): Promise<void> {
-    return this.fallback.markConversationRead(caller, conversationId);
+  async markConversationRead(_caller: CallerContext, conversationId: string): Promise<void> {
+    const supabase = await createSupabaseServerClient();
+    await rpc(supabase, 'mark_conversation_read', { p_conversation_id: conversationId });
   }
+
+  // ---- Price Offers -----------------------------------------------------------------
 
   async listOffers(caller: CallerContext): Promise<Offer[]> {
-    return this.fallback.listOffers(caller);
+    const supabase = await createSupabaseServerClient();
+    if (caller.role === 'customer') {
+      return (await rpc<Row[]>(supabase, 'c_list_offers')).map(mapOfferCamel);
+    }
+    const [offers, products, dir] = await Promise.all([
+      rows(supabase.from('offers').select('*').order('created_at', { ascending: false })),
+      rows(supabase.from('products').select('id, game_name')),
+      loadDirectory(supabase)
+    ]);
+    const games = new Map(products.map((p) => [p.id as string, p.game_name as string]));
+    return offers.map((o) => mapStaffOffer(o, dir, games));
   }
 
   async listOfferEvents(caller: CallerContext, offerId: string): Promise<OfferEvent[]> {
-    return this.fallback.listOfferEvents(caller, offerId);
+    const supabase = await createSupabaseServerClient();
+    if (caller.role === 'customer') {
+      return rpc<OfferEvent[]>(supabase, 'c_list_offer_events', { p_offer_id: offerId });
+    }
+    const list = await rows(
+      supabase.from('offer_events').select('*').eq('offer_id', offerId).order('created_at')
+    );
+    return list.map((e) => ({
+      id: e.id,
+      offerId: e.offer_id,
+      actorId: e.actor_id,
+      event: e.event,
+      meta: e.meta ?? {},
+      createdAt: e.created_at
+    }));
   }
 
   async submitOffer(
     caller: CallerContext,
     input: { productId: string; offeredPricePaise: number; clientMsgId: string }
   ): Promise<{ offer: Offer; message: CustomerMessageView }> {
-    try {
-      const supabase = await createSupabaseServerClient();
-      const { data, error } = await supabase.rpc('submit_offer', {
-        p_product_id: input.productId,
-        p_amount_paise: input.offeredPricePaise,
-        p_client_msg_id: input.clientMsgId
-      });
-      if (!error && data) {
-        return data as { offer: Offer; message: CustomerMessageView };
-      }
-    } catch {
-      // Fallback below
-    }
-    return this.fallback.submitOffer(caller, input);
+    const supabase = await createSupabaseServerClient();
+    const res = await rpc<Row>(supabase, 'submit_offer', {
+      p_product_id: input.productId,
+      p_amount_paise: input.offeredPricePaise,
+      p_client_msg_id: input.clientMsgId
+    });
+    const offer = mapOfferCamel(res.offer);
+    const me = await this.getProfileById(caller.userId);
+    return {
+      offer,
+      message: mapCustomerMessage(res.message, me?.fullName ?? 'Customer', new Map([[offer.id, offer]]))
+    };
   }
 
   async respondToOffer(
-    caller: CallerContext,
+    _caller: CallerContext,
     input: {
       offerId: string;
       action: 'counter' | 'accept' | 'reject';
@@ -564,45 +1111,125 @@ export class SupabaseDataRepository implements DataRepository {
       note?: string;
     }
   ): Promise<Offer> {
-    return this.fallback.respondToOffer(caller, input);
+    const supabase = await createSupabaseServerClient();
+    const row = await rpc<Row>(supabase, 'respond_to_offer', {
+      p_offer_id: input.offerId,
+      p_action: input.action,
+      p_counter_price_paise: input.counterPricePaise ?? null,
+      p_note: input.note ?? null
+    });
+    const dir = await loadDirectory(supabase);
+    const offers = await this.staffOffersById(supabase, dir, [row.id]);
+    return offers.get(row.id)!;
   }
 
-  async withdrawOffer(caller: CallerContext, offerId: string): Promise<Offer> {
-    return this.fallback.withdrawOffer(caller, offerId);
+  async withdrawOffer(_caller: CallerContext, offerId: string): Promise<Offer> {
+    const supabase = await createSupabaseServerClient();
+    return mapOfferCamel(await rpc<Row>(supabase, 'withdraw_offer', { p_offer_id: offerId }));
   }
 
-  async acceptCounterOffer(caller: CallerContext, offerId: string): Promise<Offer> {
-    return this.fallback.acceptCounterOffer(caller, offerId);
+  async acceptCounterOffer(_caller: CallerContext, offerId: string): Promise<Offer> {
+    const supabase = await createSupabaseServerClient();
+    return mapOfferCamel(await rpc<Row>(supabase, 'accept_counter_offer', { p_offer_id: offerId }));
   }
+
+  // ---- Support Tickets ----------------------------------------------------------------
 
   async listTickets(caller: CallerContext): Promise<Ticket[]> {
-    return this.fallback.listTickets(caller);
+    const supabase = await createSupabaseServerClient();
+    if (caller.role === 'customer') {
+      return rpc<Ticket[]>(supabase, 'c_list_tickets');
+    }
+    const [list, dir] = await Promise.all([
+      rows(supabase.from('tickets').select('*').order('created_at', { ascending: false })),
+      loadDirectory(supabase)
+    ]);
+    return list.map((t) => mapStaffTicket(t, dir));
   }
 
   async getTicketById(caller: CallerContext, ticketId: string): Promise<Ticket | null> {
-    return this.fallback.getTicketById(caller, ticketId);
+    const supabase = await createSupabaseServerClient();
+    if (caller.role === 'customer') {
+      const mine = await rpc<Ticket[]>(supabase, 'c_list_tickets');
+      return mine.find((t) => t.id === ticketId) ?? null;
+    }
+    const [{ data, error }, dir] = await Promise.all([
+      supabase.from('tickets').select('*').eq('id', ticketId).maybeSingle(),
+      loadDirectory(supabase)
+    ]);
+    if (error) fail(error);
+    return data ? mapStaffTicket(data, dir) : null;
   }
 
   async listCustomerTicketMessages(
     caller: CallerContext,
     ticketId: string
   ): Promise<CustomerTicketMessageView[]> {
-    return this.fallback.listCustomerTicketMessages(caller, ticketId);
+    const supabase = await createSupabaseServerClient();
+    const ticket = await this.getTicketById(caller, ticketId);
+    if (!ticket) throw new Error('NOT_FOUND: Ticket not found.');
+    const list = await rows(
+      supabase.from('ticket_messages').select('*').eq('ticket_id', ticketId).order('created_at')
+    );
+    return list.map((m) => mapTicketMessage(m, ticket.customerName ?? 'Customer'));
   }
 
   async listStaffTicketMessages(
     caller: CallerContext,
     ticketId: string
   ): Promise<StaffTicketMessageView[]> {
-    return this.fallback.listStaffTicketMessages(caller, ticketId);
+    if (caller.role === 'customer') {
+      throw new Error('FORBIDDEN: Staff authority required.');
+    }
+    const supabase = await createSupabaseServerClient();
+    const base = await this.listCustomerTicketMessages(caller, ticketId);
+    const staffIds = base.filter((m) => m.senderKind === 'staff').map((m) => m.id);
+    const [attrs, dir] = await Promise.all([
+      staffIds.length
+        ? rows(
+            supabase
+              .from('ticket_message_attribution')
+              .select('*')
+              .in('ticket_message_id', staffIds)
+          )
+        : Promise.resolve([] as Row[]),
+      loadDirectory(supabase)
+    ]);
+    const attrBy = byId(attrs, 'ticket_message_id');
+    return base.map((m) => {
+      const staffId = (attrBy.get(m.id)?.staff_id as string | undefined) ?? null;
+      return {
+        ...m,
+        attributedStaffId: staffId,
+        attributedStaffName: nameOf(dir, staffId),
+        attributedStaffAlias: aliasOf(dir, staffId)
+      };
+    });
   }
 
   async listTicketEvents(caller: CallerContext, ticketId: string): Promise<TicketEvent[]> {
-    return this.fallback.listTicketEvents(caller, ticketId);
+    const supabase = await createSupabaseServerClient();
+    if (caller.role === 'customer') {
+      return rpc<TicketEvent[]>(supabase, 'c_list_ticket_events', { p_ticket_id: ticketId });
+    }
+    const [list, dir] = await Promise.all([
+      rows(supabase.from('ticket_events').select('*').eq('ticket_id', ticketId).order('created_at')),
+      loadDirectory(supabase)
+    ]);
+    return list.map((e) => ({
+      id: e.id,
+      ticketId: e.ticket_id,
+      actorId: e.actor_id,
+      actorDisplayName: nameOf(dir, e.actor_id) ?? SUPPORT_NAME,
+      event: e.event,
+      fromValue: e.from_value,
+      toValue: e.to_value,
+      createdAt: e.created_at
+    }));
   }
 
   async createTicket(
-    caller: CallerContext,
+    _caller: CallerContext,
     input: {
       subject: string;
       description: string;
@@ -611,108 +1238,327 @@ export class SupabaseDataRepository implements DataRepository {
       requestedEmployeeId?: string | null;
     }
   ): Promise<Ticket> {
-    return this.fallback.createTicket(caller, input);
+    const supabase = await createSupabaseServerClient();
+    return rpc<Ticket>(supabase, 'create_ticket', {
+      p_subject: input.subject,
+      p_description: input.description,
+      p_category: input.category,
+      p_priority: input.priority,
+      p_requested_employee_id: input.requestedEmployeeId ?? null
+    });
   }
 
   async assignTicket(
     caller: CallerContext,
     input: { ticketId: string; employeeId: string }
   ): Promise<Ticket> {
-    return this.fallback.assignTicket(caller, input);
+    const supabase = await createSupabaseServerClient();
+    await rpc(supabase, 'assign_ticket', {
+      p_ticket_id: input.ticketId,
+      p_employee_id: input.employeeId
+    });
+    return (await this.getTicketById(caller, input.ticketId))!;
   }
 
   async replyTicket(
     caller: CallerContext,
     input: { ticketId: string; body: string }
   ): Promise<CustomerTicketMessageView | StaffTicketMessageView> {
-    return this.fallback.replyTicket(caller, input);
+    const supabase = await createSupabaseServerClient();
+    const msg = await rpc<Row>(supabase, 'reply_ticket', {
+      p_ticket_id: input.ticketId,
+      p_body: input.body
+    });
+    const me = await this.getProfileById(caller.userId);
+    const view = mapTicketMessage(msg, me?.fullName ?? 'Customer');
+    if (caller.role === 'customer') return view;
+    return {
+      ...view,
+      attributedStaffId: caller.userId,
+      attributedStaffName: me?.fullName ?? null,
+      attributedStaffAlias: (await loadDirectory(supabase)).aliases.get(caller.userId) ?? null
+    };
   }
 
   async transitionTicket(
     caller: CallerContext,
     input: { ticketId: string; toStatus: TicketStatus }
   ): Promise<Ticket> {
-    return this.fallback.transitionTicket(caller, input);
+    const supabase = await createSupabaseServerClient();
+    const res = await rpc<Row>(supabase, 'transition_ticket', {
+      p_ticket_id: input.ticketId,
+      p_to_status: input.toStatus
+    });
+    if (caller.role === 'customer') return res as Ticket;
+    return (await this.getTicketById(caller, input.ticketId))!;
   }
 
-  async autoCloseResolvedTickets(nowIso?: string): Promise<number> {
-    return this.fallback.autoCloseResolvedTickets(nowIso);
+  async autoCloseResolvedTickets(_nowIso?: string): Promise<number> {
+    const admin = createSupabaseAdminClient();
+    return rpc<number>(admin, 'srv_auto_close_resolved_tickets');
   }
 
   async getComplaintChatRoomByTicket(
     caller: CallerContext,
     ticketId: string
   ): Promise<ComplaintChatRoom | null> {
-    return this.fallback.getComplaintChatRoomByTicket(caller, ticketId);
+    const supabase = await createSupabaseServerClient();
+    if (caller.role === 'customer') {
+      return rpc<ComplaintChatRoom | null>(supabase, 'c_get_complaint_room', {
+        p_ticket_id: ticketId
+      });
+    }
+    const [{ data, error }, dir] = await Promise.all([
+      supabase.from('complaint_chat_rooms').select('*').eq('ticket_id', ticketId).maybeSingle(),
+      loadDirectory(supabase)
+    ]);
+    if (error) fail(error);
+    if (!data) return null;
+    const { data: tkt } = await supabase
+      .from('tickets')
+      .select('ticket_no')
+      .eq('id', ticketId)
+      .maybeSingle();
+    return {
+      id: data.id,
+      ticketId: data.ticket_id,
+      ticketNo: tkt?.ticket_no ?? 0,
+      customerId: data.customer_id,
+      customerName: nameOf(dir, data.customer_id) ?? 'Customer',
+      employeeId: data.employee_id,
+      employeeName: nameOf(dir, data.employee_id) ?? '',
+      employeeAlias: aliasOf(dir, data.employee_id) ?? '',
+      bossId: data.boss_id,
+      bossName: nameOf(dir, data.boss_id) ?? 'Boss',
+      memberIds: [data.boss_id, data.employee_id, data.customer_id],
+      createdAt: data.created_at
+    };
   }
 
   async listComplaintChatMessages(
     caller: CallerContext,
     ticketId: string
   ): Promise<ComplaintChatMessage[]> {
-    return this.fallback.listComplaintChatMessages(caller, ticketId);
+    const supabase = await createSupabaseServerClient();
+    if (caller.role === 'customer') {
+      return rpc<ComplaintChatMessage[]>(supabase, 'c_list_complaint_messages', {
+        p_ticket_id: ticketId
+      });
+    }
+    const room = await this.getComplaintChatRoomByTicket(caller, ticketId);
+    if (!room) {
+      // RLS hides rooms from non-members: tell members-only rooms apart from "no room"
+      const { count } = await createSupabaseAdminClient()
+        .from('complaint_chat_rooms')
+        .select('id', { count: 'exact', head: true })
+        .eq('ticket_id', ticketId);
+      if (count) {
+        throw new Error(
+          'FORBIDDEN: Only the 3 complaint chat room members (Boss, reported Employee, and Customer) can access this private room.'
+        );
+      }
+      return [];
+    }
+    const [list, dir] = await Promise.all([
+      rows(
+        supabase.from('complaint_chat_messages').select('*').eq('room_id', room.id).order('created_at')
+      ),
+      loadDirectory(supabase)
+    ]);
+    return list.map((m) => {
+      const role = dir.profiles.get(m.sender_id)?.role;
+      return {
+        id: m.id,
+        roomId: m.room_id,
+        ticketId: m.ticket_id,
+        senderId: m.sender_id,
+        senderRole: role,
+        senderDisplayName:
+          m.sender_id === room.bossId
+            ? `${room.bossName} (Main Admin / Boss)`
+            : m.sender_id === room.employeeId
+              ? `${room.employeeAlias} (Employee)`
+              : `${room.customerName} (Customer)`,
+        body: m.body,
+        createdAt: m.created_at
+      };
+    });
   }
 
   async sendComplaintChatMessage(
-    caller: CallerContext,
+    _caller: CallerContext,
     input: { ticketId: string; body: string }
   ): Promise<ComplaintChatMessage> {
-    return this.fallback.sendComplaintChatMessage(caller, input);
+    const supabase = await createSupabaseServerClient();
+    return rpc<ComplaintChatMessage>(supabase, 'send_complaint_message', {
+      p_ticket_id: input.ticketId,
+      p_body: input.body
+    });
   }
 
-  async listStaffThreads(caller: CallerContext): Promise<StaffThread[]> {
-    return this.fallback.listStaffThreads(caller);
+  // ---- Boss-Employee Threads & Staff Channel -----------------------------------------
+
+  async listStaffThreads(_caller: CallerContext): Promise<StaffThread[]> {
+    const supabase = await createSupabaseServerClient();
+    const [threads, dir] = await Promise.all([
+      rows(
+        supabase
+          .from('staff_threads')
+          .select('*')
+          .eq('is_group', false)
+          .order('last_message_at', { ascending: false, nullsFirst: false })
+      ),
+      loadDirectory(supabase)
+    ]);
+    return threads.map((t) => ({
+      id: t.id,
+      employeeId: t.employee_id,
+      employeeName: nameOf(dir, t.employee_id) ?? '',
+      employeeAlias: aliasOf(dir, t.employee_id) ?? t.title ?? '',
+      lastMessageAt: t.last_message_at,
+      lastMessagePreview: t.last_message_preview,
+      createdAt: t.created_at
+    }));
+  }
+
+  private mapThreadMessage(m: Row, dir: Directory, threadKey: string): StaffThreadMessage {
+    const sender = dir.profiles.get(m.sender_id);
+    const alias = aliasOf(dir, m.sender_id);
+    const isBoss = sender?.role === 'boss';
+    return {
+      id: m.id,
+      threadId: threadKey,
+      senderId: m.sender_id,
+      senderName:
+        threadKey === GROUP_THREAD_KEY && !isBoss && alias
+          ? `${sender?.full_name ?? ''} (${alias})`
+          : (sender?.full_name ?? ''),
+      senderRole: isBoss ? 'boss' : 'employee',
+      body: m.body,
+      createdAt: m.created_at
+    };
   }
 
   async listStaffThreadMessages(
-    caller: CallerContext,
+    _caller: CallerContext,
     threadId: string
   ): Promise<StaffThreadMessage[]> {
-    return this.fallback.listStaffThreadMessages(caller, threadId);
+    const supabase = await createSupabaseServerClient();
+    const realId = await this.resolveThreadId(supabase, threadId);
+    const [list, dir] = await Promise.all([
+      rows(
+        supabase.from('staff_thread_messages').select('*').eq('thread_id', realId).order('created_at')
+      ),
+      loadDirectory(supabase)
+    ]);
+    return list.map((m) => this.mapThreadMessage(m, dir, threadId));
   }
 
   async sendStaffThreadMessage(
-    caller: CallerContext,
+    _caller: CallerContext,
     input: { threadId: string; body: string }
   ): Promise<StaffThreadMessage> {
-    return this.fallback.sendStaffThreadMessage(caller, input);
+    const supabase = await createSupabaseServerClient();
+    const realId = await this.resolveThreadId(supabase, input.threadId);
+    const msg = await rpc<Row>(supabase, 'send_staff_thread_message', {
+      p_thread_id: realId,
+      p_body: input.body
+    });
+    return this.mapThreadMessage(msg, await loadDirectory(supabase), input.threadId);
   }
 
-  async listStaffAnnouncements(caller: CallerContext): Promise<StaffAnnouncement[]> {
-    return this.fallback.listStaffAnnouncements(caller);
+  async listStaffAnnouncements(_caller: CallerContext): Promise<StaffAnnouncement[]> {
+    const supabase = await createSupabaseServerClient();
+    const [anns, acks, dir] = await Promise.all([
+      rows(supabase.from('staff_announcements').select('*').order('created_at', { ascending: false })),
+      rows(supabase.from('staff_announcement_acks').select('*').order('acknowledged_at')),
+      loadDirectory(supabase)
+    ]);
+    return anns.map((a) => ({
+      id: a.id,
+      authorId: a.author_id,
+      authorName: nameOf(dir, a.author_id) ?? '',
+      title: a.title,
+      body: a.body,
+      priority: a.priority,
+      createdAt: a.created_at,
+      acks: acks
+        .filter((k) => k.announcement_id === a.id)
+        .map((k) => ({
+          announcementId: k.announcement_id,
+          employeeId: k.employee_id,
+          employeeName: nameOf(dir, k.employee_id) ?? '',
+          acknowledgedAt: k.acknowledged_at
+        }))
+    }));
   }
 
   async createStaffAnnouncement(
     caller: CallerContext,
     input: { title: string; body: string; priority: AnnouncementPriority }
   ): Promise<StaffAnnouncement> {
-    return this.fallback.createStaffAnnouncement(caller, input);
+    const supabase = await createSupabaseServerClient();
+    const a = await rpc<Row>(supabase, 'create_staff_announcement', {
+      p_title: input.title,
+      p_body: input.body,
+      p_priority: input.priority
+    });
+    const me = await this.getProfileById(caller.userId);
+    return {
+      id: a.id,
+      authorId: a.author_id,
+      authorName: me?.fullName ?? '',
+      title: a.title,
+      body: a.body,
+      priority: a.priority,
+      createdAt: a.created_at,
+      acks: []
+    };
   }
 
   async acknowledgeStaffPost(
     caller: CallerContext,
     announcementId: string
   ): Promise<StaffAnnouncementAck> {
-    return this.fallback.acknowledgeStaffPost(caller, announcementId);
+    const supabase = await createSupabaseServerClient();
+    const ack = await rpc<Row>(supabase, 'acknowledge_staff_post', {
+      p_announcement_id: announcementId
+    });
+    const me = await this.getProfileById(caller.userId);
+    return {
+      announcementId: ack.announcement_id,
+      employeeId: ack.employee_id,
+      employeeName: me?.fullName ?? '',
+      acknowledgedAt: ack.acknowledged_at
+    };
   }
 
-  async listCustomerAnnouncements(caller: CallerContext): Promise<CustomerAnnouncement[]> {
-    return this.fallback.listCustomerAnnouncements(caller);
+  // ---- Customer Announcements & Stories ----------------------------------------------
+
+  async listCustomerAnnouncements(_caller: CallerContext): Promise<CustomerAnnouncement[]> {
+    const supabase = await createSupabaseServerClient();
+    return rpc<CustomerAnnouncement[]>(supabase, 'list_customer_announcements');
   }
 
   async createCustomerAnnouncement(
-    caller: CallerContext,
+    _caller: CallerContext,
     input: { title: string; body: string; pinned: boolean }
   ): Promise<CustomerAnnouncement> {
-    return this.fallback.createCustomerAnnouncement(caller, input);
+    const supabase = await createSupabaseServerClient();
+    return rpc<CustomerAnnouncement>(supabase, 'create_customer_announcement', {
+      p_title: input.title,
+      p_body: input.body,
+      p_pinned: input.pinned
+    });
   }
 
-  async listStories(caller: CallerContext, includeExpiredForStaff?: boolean): Promise<Story[]> {
-    return this.fallback.listStories(caller, includeExpiredForStaff);
+  async listStories(_caller: CallerContext, includeExpiredForStaff = false): Promise<Story[]> {
+    const supabase = await createSupabaseServerClient();
+    return rpc<Story[]>(supabase, 'list_stories', { p_include_expired: includeExpiredForStaff });
   }
 
   async createStory(
-    caller: CallerContext,
+    _caller: CallerContext,
     input: {
       kind: StoryKind;
       caption: string;
@@ -721,58 +1567,191 @@ export class SupabaseDataRepository implements DataRepository {
       expiresAt?: string;
     }
   ): Promise<Story> {
-    return this.fallback.createStory(caller, input);
+    const supabase = await createSupabaseServerClient();
+    return rpc<Story>(supabase, 'create_story', {
+      p_kind: input.kind,
+      p_caption: input.caption,
+      p_media_path: input.mediaPath ?? null,
+      p_bg_style: input.bgStyle ?? null
+    });
   }
 
-  async recordStoryView(caller: CallerContext, storyId: string): Promise<void> {
-    return this.fallback.recordStoryView(caller, storyId);
+  async recordStoryView(_caller: CallerContext, storyId: string): Promise<void> {
+    const supabase = await createSupabaseServerClient();
+    await rpc(supabase, 'record_story_view', { p_story_id: storyId });
   }
 
-  async purgeExpiredStories(nowIso?: string): Promise<number> {
-    return this.fallback.purgeExpiredStories(nowIso);
+  async purgeExpiredStories(_nowIso?: string): Promise<number> {
+    // Expired stories are hidden by list_stories(); rows are kept (no hard deletes).
+    // Removing expired media files from Storage is handled with the upload work (step 6).
+    return 0;
   }
 
-  async listNotifications(caller: CallerContext): Promise<AppNotification[]> {
-    return this.fallback.listNotifications(caller);
+  // ---- Notifications & Push -------------------------------------------------------------
+
+  async listNotifications(_caller: CallerContext): Promise<AppNotification[]> {
+    const supabase = await createSupabaseServerClient();
+    const list = await rows(
+      supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(100)
+    );
+    return list.map((n) => ({
+      id: n.id,
+      recipientId: n.recipient_id,
+      type: n.type,
+      title: n.title,
+      body: n.body,
+      link: n.link,
+      payload: n.payload ?? {},
+      readAt: n.read_at,
+      createdAt: n.created_at
+    }));
   }
 
-  async markNotificationRead(caller: CallerContext, notificationId: string): Promise<void> {
-    return this.fallback.markNotificationRead(caller, notificationId);
+  async markNotificationRead(_caller: CallerContext, notificationId: string): Promise<void> {
+    const supabase = await createSupabaseServerClient();
+    await rpc(supabase, 'mark_notifications_read', { p_notification_id: notificationId });
   }
 
-  async markAllNotificationsRead(caller: CallerContext): Promise<void> {
-    return this.fallback.markAllNotificationsRead(caller);
+  async markAllNotificationsRead(_caller: CallerContext): Promise<void> {
+    const supabase = await createSupabaseServerClient();
+    await rpc(supabase, 'mark_notifications_read', { p_notification_id: null });
   }
 
   async savePushSubscription(
     caller: CallerContext,
     input: { endpoint: string; p256dh: string; auth: string; userAgent?: string }
   ): Promise<PushSubscriptionRecord> {
-    return this.fallback.savePushSubscription(caller, input);
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase
+      .from('push_subscriptions')
+      .upsert(
+        {
+          user_id: caller.userId,
+          endpoint: input.endpoint,
+          p256dh: input.p256dh,
+          auth: input.auth,
+          user_agent: input.userAgent ?? null
+        },
+        { onConflict: 'endpoint' }
+      )
+      .select('*')
+      .single();
+    if (error || !data) fail(error);
+    return {
+      id: data.id,
+      userId: data.user_id,
+      endpoint: data.endpoint,
+      p256dh: data.p256dh,
+      auth: data.auth,
+      userAgent: data.user_agent,
+      createdAt: data.created_at
+    };
   }
+
+  // ---- Performance Analytics & Audit Log ------------------------------------------------
 
   async getEmployeePerformance(
     caller: CallerContext,
     filter?: PerformanceQueryFilter
   ): Promise<EmployeePerformanceMetrics[]> {
-    return this.fallback.getEmployeePerformance(caller, filter);
+    if (caller.role === 'customer') {
+      throw new Error('FORBIDDEN: Staff authority required.');
+    }
+    const supabase = await createSupabaseServerClient();
+    const [employees, activityEvents, ticketEventRows, ticketRows, dir] = await Promise.all([
+      this.listEmployeesWithFlags(caller),
+      this.listActivityEvents(caller),
+      rows(supabase.from('ticket_events').select('*')),
+      rows(supabase.from('tickets').select('*')),
+      loadDirectory(supabase)
+    ]);
+    const ticketEvents: TicketEvent[] = ticketEventRows.map((e) => ({
+      id: e.id,
+      ticketId: e.ticket_id,
+      actorId: e.actor_id,
+      actorDisplayName: nameOf(dir, e.actor_id) ?? '',
+      event: e.event,
+      fromValue: e.from_value,
+      toValue: e.to_value,
+      createdAt: e.created_at
+    }));
+
+    // Permission Matrix: Employees see only their own numbers; Boss sees all employees & filters
+    const effectiveFilter: PerformanceQueryFilter =
+      caller.role === 'employee' ? { ...filter, employeeId: caller.userId } : { ...filter };
+
+    return calculateEmployeeMetrics({
+      employees,
+      activityEvents,
+      ticketEvents,
+      tickets: ticketRows.map((t) => mapStaffTicket(t, dir)),
+      filter: effectiveFilter
+    });
   }
 
   async listActivityEvents(
     caller: CallerContext,
     filter?: PerformanceQueryFilter
   ): Promise<ActivityEvent[]> {
-    return this.fallback.listActivityEvents(caller, filter);
+    if (caller.role === 'customer') {
+      throw new Error('FORBIDDEN: Staff authority required.');
+    }
+    const supabase = await createSupabaseServerClient();
+    // RLS: Boss sees all events, employees only their own
+    let query = supabase.from('activity_events').select('*').order('occurred_at', { ascending: false });
+    if (filter?.employeeId) query = query.eq('actor_id', filter.employeeId);
+    const [list, dir] = await Promise.all([rows(query), loadDirectory(supabase)]);
+    return list
+      .filter((e) => inRange(e.occurred_at, filter))
+      .map((e) => ({
+        id: e.id,
+        occurredAt: e.occurred_at,
+        actorId: e.actor_id,
+        actorName: nameOf(dir, e.actor_id) ?? undefined,
+        actorRole: e.actor_role,
+        eventType: e.event_type,
+        customerId: e.customer_id,
+        conversationId: e.conversation_id,
+        ticketId: e.ticket_id,
+        offerId: e.offer_id,
+        messageId: e.message_id,
+        meta: e.meta ?? {}
+      }));
   }
 
   async exportPerformanceCsv(
     caller: CallerContext,
     filter?: PerformanceQueryFilter
   ): Promise<string> {
-    return this.fallback.exportPerformanceCsv(caller, filter);
+    if (caller.role !== 'boss') {
+      throw new Error('FORBIDDEN: Boss authority required.');
+    }
+    const rowsOut = await this.getEmployeePerformance(caller, filter);
+    const supabase = await createSupabaseServerClient();
+    await rpc(supabase, 'log_performance_export', {
+      p_filter: filter ?? {},
+      p_row_count: rowsOut.length
+    });
+    return buildPerformanceCsv(rowsOut);
   }
 
-  async listAuditLogs(caller: CallerContext): Promise<AuditLogEntry[]> {
-    return this.fallback.listAuditLogs(caller);
+  async listAuditLogs(_caller: CallerContext): Promise<AuditLogEntry[]> {
+    const supabase = await createSupabaseServerClient();
+    const [list, dir] = await Promise.all([
+      rows(supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(500)),
+      loadDirectory(supabase)
+    ]);
+    return list.map((a) => ({
+      id: a.id,
+      actorId: a.actor_id,
+      actorName: nameOf(dir, a.actor_id) ?? undefined,
+      action: a.action,
+      entity: a.entity,
+      entityId: a.entity_id,
+      beforeMeta: a.before_meta,
+      afterMeta: a.after_meta,
+      ip: a.ip,
+      createdAt: a.created_at
+    }));
   }
 }

@@ -11,17 +11,18 @@
 | Step | Scope | Status |
 | :--- | :--- | :--- |
 | 1 | Auth lockdown: remove `?as=` / persona-action / default-customer backdoors in live mode, real Supabase password + OTP auth in the adapter, fail closed without keys, remove `jr-live-db` state dump, cron secret fail-closed | ✅ Done (`fix/step1-auth-lockdown`) |
-| 2 | Real Supabase adapter: replace every `this.fallback` call with Postgres queries / RPCs; add missing RPCs (`respond_to_offer`, `withdraw_offer`, `reply_ticket`, invite) | ⏳ Next |
-| 3 | RLS fixes: remove direct customer UPDATE/INSERT on offers, tickets, conversations, spin_bonuses; hide staff ids from customers; Realtime publication; drop spin bonus | ⏳ |
-| 4 | Real DB tests against local Supabase (needs Docker) + fix stale E2E name expectations | ⏳ |
+| 2 | Real Supabase adapter (no mock fallback), migration `00003_live_data_layer.sql` (all RPCs, sanitized `c_*` customer reads, locked-down writes), spin bonus removed, boss seed with password, OTP email template | ✅ Done (`feat/step2-real-supabase`) |
+| 3 | RLS fixes | ✅ Folded into step 2 (00003). Remaining: storage upload policies review in step 6 |
+| 4 | DB tests: `npm run test:db` (8 suites vs local Supabase) exists and passes; still to do: CI wiring, live-mode Playwright suite, fix stale demo E2E names | 🔄 Next |
 | 5 | Upgrade Next.js & vulnerable deps, durable rate limiting, regenerate `apply_all.sql` | ⏳ |
 | 6 | Resend email, signed uploads, Web Push, Sentry | ⏳ |
 | 7 | Staging deploy, 3-role walkthrough, production | ⏳ |
 
-- **Step 1 verification**: `tsc` clean; Vitest 40/40 (incl. 11 new tests in `tests/unit/auth-lockdown.test.ts`); security lint clean; `next build` OK; live `next start` probes confirm `?as=boss-1` and a forged `jr_mock_user_id=boss-1` cookie redirect to `/login` (live keys) or `/login?error=not_configured` (no keys).
-- **Known issues**: Live mode logs in through real Supabase Auth, but all other data calls still go to the mock (step 2), so the live app is non-functional until step 2 — by design it now fails closed instead of silently using demo data. Playwright: 1/3 pass; 2 failures pre-date step 1 (tests expect demo names "Aarav Mehta"/"Vikram Singh" that commit `676e5a1` removed).
-- **Operator**: check Supabase Storage for a `jr-live-db` bucket (may contain a full state dump incl. plaintext demo passwords) and delete it; install Docker Desktop for step 4.
-- **Next Action**: Start step 2 after operator approval.
+- **Step 2 verification (2026-11-03)**: `tsc` clean; Vitest unit 40/40; `npm run test:db` 8/8 against local Supabase (invites + emailed OTP via Mailpit, role rules, staff anonymity, offer self-accept blocked, ticket state machine, complaint-room privacy, suspension, append-only logs, `srv_*` not callable); security lint clean; `next build` OK; Playwright sweep in live-local mode: all 29 pages load for boss/employee/customer with 0 errors; UI chat round-trip verified (customer sees only "John Rambo Support").
+- **How to run locally against a real DB**: `npx supabase start` → `npx supabase db reset` → export local keys (`npx supabase status -o env`) → `BOSS_EMAIL=… BOSS_PASSWORD=… BOSS_FULL_NAME=… npx tsx scripts/seed-boss.ts` → `npx next dev`.
+- **Known issues**: Playwright demo suite still has 2 stale-name failures (pre-existing). Stories' expired media is not yet deleted from Storage (step 6). Customer email change waits for Supabase confirmation link (needs email delivery, step 6).
+- **Operator**: delete the empty `jr-live-db` bucket; decide on logo; accounts for steps 6–7.
+- **Next Action**: Step 4 — wire `test:db` into CI, add live-mode Playwright flows, fix stale E2E names.
 
 ---
 

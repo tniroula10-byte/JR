@@ -11,7 +11,7 @@ import {
   getEmployeesWithFlagsFromState,
   type MockDatabaseState
 } from '@/mocks/seed-data';
-import { calculateEmployeeMetrics } from '@/lib/analytics/metrics';
+import { buildPerformanceCsv, calculateEmployeeMetrics } from '@/lib/analytics/metrics';
 import { formatPaiseToINR } from '@/lib/money';
 import { checkRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
 import { validateTicketTransition } from '@/lib/tickets/state-machine';
@@ -2817,6 +2817,7 @@ export class MockDataRepository implements DataRepository {
         const viewsForStory = state.storyViews.filter((v) => v.storyId === s.id);
         return {
           ...s,
+          authorIsBoss: s.authorId === 'boss-1',
           viewCount: viewsForStory.length,
           viewedByCaller: viewsForStory.some((v) => v.customerId === p.id)
         };
@@ -2851,6 +2852,7 @@ export class MockDataRepository implements DataRepository {
       bgStyle: input.bgStyle ?? 'from-violet-900 via-indigo-950 to-slate-950',
       createdAt: nowIso,
       expiresAt: expiresIso,
+      authorIsBoss: caller.role === 'boss',
       viewCount: 0,
       viewedByCaller: false
     };
@@ -3005,60 +3007,7 @@ export class MockDataRepository implements DataRepository {
     const boss = assertBoss(state, caller);
     const rows = await this.getEmployeePerformance(caller, filter);
 
-    const headers = [
-      'Employee ID',
-      'Employee Name',
-      'Public Alias',
-      'Chat Messages Sent',
-      'Ticket Replies Sent',
-      'Chat First Response Avg (s)',
-      'Chat First Response Median (s)',
-      'Chat First Response P90 (s)',
-      'Ticket First Response Avg (s)',
-      'Ticket First Response Median (s)',
-      'Ticket First Response P90 (s)',
-      'Ticket Resolution Avg (s)',
-      'Ticket Resolution Median (s)',
-      'Tickets Assigned',
-      'Tickets Resolved',
-      'Tickets Pending',
-      'Tickets Reopened',
-      'Offers Handled Total',
-      'Offers Accepted',
-      'Offers Countered',
-      'Offers Rejected',
-      'Conversations Handled'
-    ];
-
-    const lines = [headers.join(',')];
-    for (const r of rows) {
-      lines.push(
-        [
-          r.employeeId,
-          `"${r.employeeName.replace(/"/g, '""')}"`,
-          `"${r.publicAlias.replace(/"/g, '""')}"`,
-          r.chatMessagesSent,
-          r.ticketRepliesSent,
-          r.chatFirstResponseAvgSec ?? '',
-          r.chatFirstResponseMedianSec ?? '',
-          r.chatFirstResponseP90Sec ?? '',
-          r.ticketFirstResponseAvgSec ?? '',
-          r.ticketFirstResponseMedianSec ?? '',
-          r.ticketFirstResponseP90Sec ?? '',
-          r.ticketResolutionAvgSec ?? '',
-          r.ticketResolutionMedianSec ?? '',
-          r.ticketsAssigned,
-          r.ticketsResolved,
-          r.ticketsPending,
-          r.ticketsReopened,
-          r.offersHandledTotal,
-          r.offersAccepted,
-          r.offersCountered,
-          r.offersRejected,
-          r.conversationsHandled
-        ].join(',')
-      );
-    }
+    const csv = buildPerformanceCsv(rows);
 
     state.auditLogs.unshift({
       id: `aud-${Date.now()}-export`,
@@ -3074,7 +3023,7 @@ export class MockDataRepository implements DataRepository {
     });
     saveState(state);
 
-    return lines.join('\n');
+    return csv;
   }
 
   async listAuditLogs(caller: CallerContext): Promise<AuditLogEntry[]> {

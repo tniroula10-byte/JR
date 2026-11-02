@@ -164,3 +164,70 @@ export function calculateEmployeeMetrics(params: {
     };
   });
 }
+
+const PERFORMANCE_CSV_HEADERS = [
+  'Employee ID',
+  'Employee Name',
+  'Public Alias',
+  'Chat Messages Sent',
+  'Ticket Replies Sent',
+  'Chat First Response Avg (s)',
+  'Chat First Response Median (s)',
+  'Chat First Response P90 (s)',
+  'Ticket First Response Avg (s)',
+  'Ticket First Response Median (s)',
+  'Ticket First Response P90 (s)',
+  'Ticket Resolution Avg (s)',
+  'Ticket Resolution Median (s)',
+  'Tickets Assigned',
+  'Tickets Resolved',
+  'Tickets Pending',
+  'Tickets Reopened',
+  'Offers Handled Total',
+  'Offers Accepted',
+  'Offers Countered',
+  'Offers Rejected',
+  'Conversations Handled'
+];
+
+/**
+ * Quotes a text cell and neutralises spreadsheet formula injection
+ * (cells starting with = + - @ are prefixed with an apostrophe).
+ */
+export function csvTextCell(value: string): string {
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+
+export function buildPerformanceCsv(rows: EmployeePerformanceMetrics[]): string {
+  const lines = [PERFORMANCE_CSV_HEADERS.join(',')];
+  for (const r of rows) {
+    lines.push(
+      [
+        r.employeeId,
+        csvTextCell(r.employeeName),
+        csvTextCell(r.publicAlias),
+        r.chatMessagesSent,
+        r.ticketRepliesSent,
+        r.chatFirstResponseAvgSec ?? '',
+        r.chatFirstResponseMedianSec ?? '',
+        r.chatFirstResponseP90Sec ?? '',
+        r.ticketFirstResponseAvgSec ?? '',
+        r.ticketFirstResponseMedianSec ?? '',
+        r.ticketFirstResponseP90Sec ?? '',
+        r.ticketResolutionAvgSec ?? '',
+        r.ticketResolutionMedianSec ?? '',
+        r.ticketsAssigned,
+        r.ticketsResolved,
+        r.ticketsPending,
+        r.ticketsReopened,
+        r.offersHandledTotal,
+        r.offersAccepted,
+        r.offersCountered,
+        r.offersRejected,
+        r.conversationsHandled
+      ].join(',')
+    );
+  }
+  return lines.join('\n');
+}

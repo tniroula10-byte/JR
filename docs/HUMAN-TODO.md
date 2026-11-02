@@ -9,15 +9,18 @@ Everything in the **John Rambo** codebase runs and passes automated verification
 1. Sign in to [https://supabase.com/dashboard](https://supabase.com/dashboard) and create two projects (or one Production project first):
    - **Production**: `john-rambo-prod` (Region: `ap-south-1` Mumbai recommended for `Asia/Kolkata` latency)
    - **Staging**: `john-rambo-staging`
-2. In your Supabase Dashboard, go to **Authentication → Providers → Email**:
-   - **Disable** "Allow new users to sign up" (Public sign-up MUST be disabled; users join by invitation only).
-   - **Enable** "Email OTP / Magic Link".
-3. Go to **Authentication → URL Configuration**:
+2. In your Supabase Dashboard, go to **Authentication → Sign In / Providers**:
+   - Turn **off** "Allow new users to sign up" (users join by invitation only).
+   - Keep the **Email** provider **enabled** (email + password login and the 6-digit invite code both use it).
+3. Go to **Authentication → Email Templates → Magic Link** and replace the template so it contains the code:
+   - Subject: `Your John Rambo verification code`
+   - Body: paste the contents of [`supabase/templates/otp-code.html`](../supabase/templates/otp-code.html) (it must contain `{{ .Token }}`).
+4. Go to **Authentication → URL Configuration**:
    - Set **Site URL** to your production domain (or `http://localhost:3000` for local testing).
    - Add Redirect URLs:
      - `http://localhost:3000/callback`
      - `https://<your-vercel-domain>/callback`
-4. Go to **Project Settings → API** and copy:
+5. Go to **Project Settings → API** and copy:
    - **Project URL** (`NEXT_PUBLIC_SUPABASE_URL`)
    - **anon public key** (`NEXT_PUBLIC_SUPABASE_ANON_KEY`)
    - **service_role secret key** (`SUPABASE_SERVICE_ROLE_KEY`) — *Keep secret; never expose to the browser!*
@@ -26,13 +29,13 @@ Everything in the **John Rambo** codebase runs and passes automated verification
 
 ## Step 2: Apply the Database Schema & RLS Migrations
 
-You have two options to apply all migrations (`00001` through `00008`):
+Apply the three migrations (`00001` to `00003`) to a **fresh** project. If the project already has tables from an earlier attempt, ask Claude to reset it first; there is no real data to keep.
 
 ### Option A: Via Supabase SQL Editor (Fastest, No CLI Required)
 1. Open the file [`supabase/apply_all.sql`](../supabase/apply_all.sql) in this repository.
 2. In your Supabase Dashboard, navigate to **SQL Editor → New Query**.
 3. Paste the entire contents of `supabase/apply_all.sql` and click **Run**.
-4. Verify in **Table Editor** that all 22 tables exist and display **RLS Enabled**.
+4. Verify in **Table Editor** that all 28 tables exist and display **RLS Enabled**.
 
 ### Option B: Via Supabase CLI
 ```bash
@@ -70,6 +73,8 @@ Required keys in `.env.local`:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `BOSS_EMAIL` (your personal email address for the single Boss account)
+- `BOSS_PASSWORD` (at least 12 characters; used once to create the Boss login — remove it from the file afterwards)
+- `BOSS_USERNAME` (optional, e.g. `BOKA10`) and `BOSS_PUBLIC_ALIAS` (name customers see in complaint rooms, e.g. `BOKA`)
 - `BOSS_FULL_NAME`
 - `BOSS_PHONE` (E.164 format, e.g. `+919876543210`)
 - `RESEND_API_KEY`
@@ -86,7 +91,7 @@ Once `.env.local` is populated and migrations are applied, run the idempotent Bo
 npm run seed:boss
 ```
 
-This creates/activates your singleton `boss` profile and sends a magic link (or makes your email ready for magic-link login at `/login`).
+This creates the single `boss` account with your password. Running it again changes nothing. Sign in at `/login` with your email (or username) and `BOSS_PASSWORD`, then delete `BOSS_PASSWORD` from `.env.local`.
 
 ---
 

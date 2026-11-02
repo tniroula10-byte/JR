@@ -517,6 +517,22 @@ AS $$
   WHERE r.ticket_id = p_ticket_id AND r.customer_id = auth.uid() AND public.is_customer();
 $$;
 
+-- Employees a customer may name in a complaint ticket (public alias only)
+CREATE OR REPLACE FUNCTION public.list_reportable_staff_aliases()
+RETURNS TABLE (staff_id uuid, public_alias text)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT sp.user_id, sp.public_alias
+  FROM public.staff_profiles sp
+  JOIN public.profiles p ON p.id = sp.user_id
+  WHERE public.is_active()
+    AND p.role = 'employee' AND p.status = 'active' AND sp.accepts_tickets
+  ORDER BY sp.public_alias;
+$$;
+
 CREATE OR REPLACE FUNCTION public.list_customer_announcements()
 RETURNS jsonb
 LANGUAGE sql

@@ -12,14 +12,12 @@ export function hasLiveSupabaseKeys(): boolean {
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!url || !anonKey) return false;
-  if (
-    anonKey === 'your-supabase-anon-key-here' ||
-    url === 'http://127.0.0.1:54321' ||
-    process.env.JR_FORCE_MOCK === '1'
-  ) {
+  if (anonKey === 'your-supabase-anon-key-here' || process.env.JR_FORCE_MOCK === '1') {
     return false;
   }
-  return url.startsWith('https://') && anonKey.length > 30;
+  // Local Supabase (`npx supabase start`) counts as live so it can be tested end to end
+  const isLocal = /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(url);
+  return (url.startsWith('https://') || isLocal) && anonKey.length > 30;
 }
 
 export function isDemoAuthAllowed(): boolean {

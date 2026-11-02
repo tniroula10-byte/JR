@@ -336,7 +336,8 @@ export interface CustomerAnnouncement {
 
 export interface Story {
   id: string;
-  authorId: string;
+  authorId: string; // Empty for customers (staff ids are never exposed)
+  authorIsBoss: boolean;
   kind: StoryKind;
   mediaPath: string | null;
   caption: string;

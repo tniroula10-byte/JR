@@ -80,7 +80,7 @@ export function CustomerHomeClient({
   }, [initialMessages]);
 
   // Show 24-hour story on top ONLY if Boss (BOKA) has posted a story
-  const bossStories = stories.filter((s) => s.authorId === 'boss-1');
+  const bossStories = stories.filter((s) => s.authorIsBoss);
   const unreadNotifs = notifications.filter((n) => !n.readAt);
 
   async function handleSendAdminMessage(e: React.FormEvent) {

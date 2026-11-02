@@ -2,72 +2,96 @@
  * Idempotent Singleton Boss Bootstrap Script (`scripts/seed-boss.ts`)
  * Decision 2: A one-time, idempotent seed script reads `BOSS_EMAIL` from the environment
  * and creates the single boss. A partial unique index guarantees there is only one boss.
+ *
+ * Usage: BOSS_EMAIL=... BOSS_PASSWORD=... BOSS_FULL_NAME=... npm run seed:boss
+ * Runs outside Next.js, so it builds its own service-role client instead of importing
+ * the `server-only` modules under `lib/`.
  */
 
-import 'server-only';
-import { hasLiveSupabaseKeys } from '../lib/data';
-import { MockDataRepository } from '../lib/data/mock';
-import { createSupabaseAdminClient } from '../lib/supabase/admin';
+import { createClient } from '@supabase/supabase-js';
+import { hasLiveSupabaseKeys } from '../lib/supabase/env';
+
+function required(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing ${name}. Set it in .env.local or on the command line.`);
+  }
+  return value;
+}
 
 async function main() {
-  const bossEmail = (process.env.BOSS_EMAIL || 'boka@johnrambo.us').trim().toLowerCase();
-  const bossName = (process.env.BOSS_FULL_NAME || 'BOKA').trim();
-  const bossPhone = (process.env.BOSS_PHONE || '+13105550001').trim();
-
   if (!hasLiveSupabaseKeys()) {
-    const repo = new MockDataRepository();
-    const existing = await repo.getProfileByEmail(bossEmail);
-    console.log(
-      `✓ [Mock Mode] Singleton Boss verified: ${existing?.fullName ?? bossName} (${bossEmail},phone=${bossPhone})`
-    );
+    console.log('No Supabase keys configured: demo mode already includes the Boss (BOKA). Nothing to do.');
     return;
   }
 
-  const supabaseAdmin = createSupabaseAdminClient();
+  const bossEmail = required('BOSS_EMAIL').toLowerCase();
+  const bossPassword = required('BOSS_PASSWORD');
+  const bossName = required('BOSS_FULL_NAME');
+  const bossUsername = process.env.BOSS_USERNAME?.trim() || null;
+  const bossAlias = process.env.BOSS_PUBLIC_ALIAS?.trim() || bossName;
+  const bossPhone = process.env.BOSS_PHONE?.trim() || null;
 
-  const { data: existingBoss } = await supabaseAdmin
-    .from('profiles')
-    .select('*')
-    .eq('role', 'boss')
-    .maybeSingle();
-
-  if (existingBoss) {
-    console.log(
-      `✓ Singleton Boss already bootstrapped: ${existingBoss.email} (id=${existingBoss.id}). Exiting idempotently.`
-    );
-    return;
+  if (bossPassword.length < 12) {
+    throw new Error('BOSS_PASSWORD must be at least 12 characters.');
   }
 
-  const { data: createdAuth, error: authErr } = await supabaseAdmin.auth.admin.createUser({
-    email: bossEmail,
-    email_confirm: true
+  const admin = createClient(required('NEXT_PUBLIC_SUPABASE_URL'), required('SUPABASE_SERVICE_ROLE_KEY'), {
+    auth: { autoRefreshToken: false, persistSession: false }
   });
 
-  if (authErr || !createdAuth.user) {
-    throw new Error(`Failed to create Boss auth user: ${authErr?.message}`);
+  const { data: existingBoss, error: lookupErr } = await admin
+    .from('profiles')
+    .select('id, email')
+    .eq('role', 'boss')
+    .maybeSingle();
+  if (lookupErr) {
+    throw new Error(`Could not read profiles (are the migrations applied?): ${lookupErr.message}`);
+  }
+  if (existingBoss) {
+    console.log(`✓ Boss already exists: ${existingBoss.email}. Nothing changed.`);
+    return;
   }
 
-  const userId = createdAuth.user.id;
-  await supabaseAdmin.from('profiles').insert({
+  const { data: created, error: authErr } = await admin.auth.admin.createUser({
+    email: bossEmail,
+    password: bossPassword,
+    email_confirm: true
+  });
+  if (authErr || !created.user) {
+    throw new Error(`Failed to create Boss auth user: ${authErr?.message}`);
+  }
+  const userId = created.user.id;
+
+  const { error: profileErr } = await admin.from('profiles').insert({
     id: userId,
     role: 'boss',
     status: 'active',
+    username: bossUsername,
     full_name: bossName,
     email: bossEmail,
-    phone: bossPhone
+    phone: bossPhone,
+    approved_at: new Date().toISOString()
   });
+  if (profileErr) {
+    await admin.auth.admin.deleteUser(userId);
+    throw new Error(`Failed to create Boss profile: ${profileErr.message}`);
+  }
 
-  await supabaseAdmin.from('staff_profiles').insert({
+  const { error: staffErr } = await admin.from('staff_profiles').insert({
     user_id: userId,
-    public_alias: 'BOKA',
+    public_alias: bossAlias,
     customer_selectable: false,
     accepts_tickets: true,
     can_manage_products: true,
     can_publish_stories: true,
     can_post_customer_announcements: true
   });
+  if (staffErr) {
+    throw new Error(`Boss profile created but staff profile failed: ${staffErr.message}`);
+  }
 
-  await supabaseAdmin.from('audit_log').insert({
+  await admin.from('audit_log').insert({
     actor_id: userId,
     action: 'boss_bootstrap',
     entity: 'profiles',
@@ -75,10 +99,10 @@ async function main() {
     after_meta: { email: bossEmail, role: 'boss' }
   });
 
-  console.log(`✓ Bootstrapped Singleton Boss: ${bossEmail} (id=${userId})`);
+  console.log(`✓ Created the Boss account: ${bossEmail}. Sign in at /login with BOSS_PASSWORD.`);
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 });
