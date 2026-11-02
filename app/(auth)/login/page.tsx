@@ -17,14 +17,13 @@ import {
   CheckCircle2,
   Clock,
   KeyRound,
-  Lock,
-  Shield
+  Lock
 } from 'lucide-react';
 import {
   loginWithPasswordAction,
   verifyEmailOtpAndSetPasswordAction
 } from '@/actions';
-import { Button, Card, Input } from '@/components/ui/primitives';
+import { BrandLogo, Button, Card, Input } from '@/components/ui/primitives';
 
 function LoginContent() {
   const router = useRouter();
@@ -114,11 +113,8 @@ function LoginContent() {
     <div className="min-h-screen flex flex-col justify-center items-center px-4 py-10 bg-midnight-950">
       <div className="w-full max-w-md space-y-6">
         <div className="flex flex-col items-center text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-600/20 border border-violet-500/40 shadow-violet-glow">
-            <Shield className="h-7 w-7 text-violet-300" aria-hidden="true" />
-          </div>
-          <h1 className="mt-4 text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-            John Rambo
+          <h1>
+            <BrandLogo size="lg" />
           </h1>
         </div>
 

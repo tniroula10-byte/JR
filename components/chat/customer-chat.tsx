@@ -8,9 +8,9 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Coins, Send, Shield, RefreshCw } from 'lucide-react';
+import { Coins, Send, RefreshCw } from 'lucide-react';
 import { sendCustomerMessageAction } from '@/actions';
-import { Badge, Button, Card, Input } from '@/components/ui/primitives';
+import { Badge, BrandLogo, Button, Card, Input } from '@/components/ui/primitives';
 import type { Conversation, CustomerMessageView } from '@/lib/data/types';
 import { formatPaiseToINR } from '@/lib/money';
 import { formatISTTime } from '@/lib/time';
@@ -70,18 +70,10 @@ export function CustomerChatClient({
     <div className="space-y-4">
       <Card className="p-4 flex items-center justify-between border-violet-500/35">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-600/20 border border-violet-500/40 shadow-violet-glow">
-            <Shield className="h-5 w-5 text-violet-300" aria-hidden="true" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-midnight-950 border border-red-600/40">
+            <BrandLogo size="xs" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-base font-bold text-white">John Rambo Support</h1>
-              <Badge tone="emerald">Official Desk</Badge>
-            </div>
-            <p className="text-xs text-slate-400">
-              Private encrypted channel • Shared team identity
-            </p>
-          </div>
+          <h1 className="text-base font-bold text-white">John Rambo Support</h1>
         </div>
         <Button
           variant="ghost"

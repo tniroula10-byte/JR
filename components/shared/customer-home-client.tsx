@@ -24,7 +24,6 @@ import {
   Minimize2,
   Pin,
   Send,
-  Shield,
   Sparkles
 } from 'lucide-react';
 import {
@@ -33,7 +32,7 @@ import {
 } from '@/actions';
 import { CustomerCatalogClient } from '@/components/catalog/customer-catalog';
 import { StoryViewerClient } from '@/components/stories/story-viewer';
-import { Badge, Button, Card, EmptyState, Input } from '@/components/ui/primitives';
+import { Badge, BrandLogo, Button, Card, EmptyState, Input } from '@/components/ui/primitives';
 import type {
   AppNotification,
   Conversation,
@@ -271,8 +270,8 @@ export function CustomerHomeClient({
             className="flex cursor-pointer items-center justify-between gap-3 bg-gradient-to-r from-violet-950/60 via-midnight-900 to-midnight-900 px-5 py-4 transition hover:bg-midnight-800/80"
           >
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600/20 border border-violet-500/40 shadow-violet-glow">
-                <Shield className="h-5 w-5 text-violet-300" aria-hidden="true" />
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-midnight-950 border border-red-600/40">
+                <BrandLogo size="xs" />
               </div>
               <div>
                 <div className="flex items-center gap-2">

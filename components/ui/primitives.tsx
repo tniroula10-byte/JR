@@ -156,3 +156,27 @@ export function EmptyState({
     </div>
   );
 }
+
+/** Brand wordmark: "RAMBO" in red, used as the site logo. */
+export function BrandLogo({
+  size = 'md',
+  className
+}: {
+  size?: 'xs' | 'sm' | 'md' | 'lg';
+  className?: string;
+}) {
+  const sizes = {
+    xs: 'text-[8px] tracking-normal',
+    sm: 'text-sm tracking-wider',
+    md: 'text-lg tracking-wider',
+    lg: 'text-4xl sm:text-5xl tracking-widest'
+  };
+  return (
+    <span
+      aria-label="John Rambo"
+      className={cn('font-black uppercase leading-none text-red-600', sizes[size], className)}
+    >
+      RAMBO
+    </span>
+  );
+}

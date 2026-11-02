@@ -36,7 +36,7 @@ import {
   User
 } from 'lucide-react';
 import { signOutAction } from '@/actions';
-import { Badge, Button } from '@/components/ui/primitives';
+import { Badge, BrandLogo, Button } from '@/components/ui/primitives';
 import type { Profile } from '@/lib/data/types';
 import { cn } from '@/lib/utils';
 
@@ -139,17 +139,7 @@ export function AppShell({
               }
               className="flex items-center gap-2.5 rounded-xl focus:outline-none"
             >
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-600/20 border border-violet-500/40 shadow-violet-glow">
-                <Shield className="h-5 w-5 text-violet-300" aria-hidden="true" />
-              </div>
-              <div className="truncate">
-                <span className="text-sm sm:text-base font-bold tracking-tight text-white">
-                  JOHN RAMBO
-                </span>
-                <span className="hidden sm:inline-block ml-2 text-xs text-slate-400">
-                  Points Exchange
-                </span>
-              </div>
+              <BrandLogo size="md" />
             </Link>
 
             <Badge
