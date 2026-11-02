@@ -8,21 +8,9 @@
 import { MockDataRepository } from '@/lib/data/mock';
 import { SupabaseDataRepository } from '@/lib/data/supabase';
 import type { DataRepository } from '@/lib/data/types';
+import { hasLiveSupabaseKeys } from '@/lib/supabase/env';
 
-export function hasLiveSupabaseKeys(): boolean {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !anonKey) return false;
-  if (
-    anonKey === 'your-supabase-anon-key-here' ||
-    url === 'http://127.0.0.1:54321' ||
-    process.env.JR_FORCE_MOCK === '1'
-  ) {
-    return false;
-  }
-  return url.startsWith('https://') && anonKey.length > 30;
-}
+export { hasLiveSupabaseKeys, isDemoAuthAllowed } from '@/lib/supabase/env';
 
 const mockRepoInstance = new MockDataRepository();
 const supabaseRepoInstance = new SupabaseDataRepository();

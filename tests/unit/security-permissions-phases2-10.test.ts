@@ -409,6 +409,36 @@ describe('Comprehensive Security, Permission Matrix & Phase 2-10 Self-Checks', (
   });
 
   it('enforces customer approval before first login, WebSocket blocking, anti-enumeration, role approval rules, and audit logs', async () => {
+    // 0. Uninvited emails can never create an account through the OTP form
+    await expect(
+      repo.verifyEmailOtpAndSetPassword({
+        email: 'uninvited.stranger@example.com',
+        otpCode: '123456',
+        password: 'StrangerPass123@'
+      })
+    ).rejects.toThrow(/INVALID_OTP/);
+    expect(await repo.getProfileByEmail('uninvited.stranger@example.com')).toBeNull();
+
+    // Staff accounts cannot use the customer OTP form, and get the same generic error
+    await expect(
+      repo.verifyEmailOtpAndSetPassword({
+        email: (await repo.getProfileById('emp-1'))!.email,
+        otpCode: '123456',
+        password: 'HijackPass123@'
+      })
+    ).rejects.toThrow(/INVALID_OTP/);
+
+    await repo.inviteUser(boss, {
+      email: 'pending.buyer@johnrambo.us',
+      fullName: 'Pending Buyer',
+      intendedRole: 'customer'
+    });
+    await repo.inviteUser(boss, {
+      email: 'rejected.buyer@johnrambo.us',
+      fullName: 'Rejected Buyer',
+      intendedRole: 'customer'
+    });
+
     // 1. After a customer verifies their email OTP and sets a password, their status becomes PENDING_APPROVAL instead of ACTIVE
     const pendingCustomer = await repo.verifyEmailOtpAndSetPassword({
       email: 'pending.buyer@johnrambo.us',
@@ -638,14 +668,14 @@ describe('Comprehensive Security, Permission Matrix & Phase 2-10 Self-Checks', (
     });
     expect(ankyLogin.ok).toBe(false);
 
-    // 3. Employee first-time login cannot use email OTP
+    // 3. Employee first-time login cannot use email OTP (generic error, so staff emails cannot be enumerated)
     await expect(
       repo.verifyEmailOtpAndSetPassword({
         email: 'guz@johnrambo.us',
         otpCode: '123456',
         password: 'NewPassword123'
       })
-    ).rejects.toThrow(/FORBIDDEN/);
+    ).rejects.toThrow(/INVALID_OTP/);
 
     // 4. Non-Boss (employee or customer) cannot use adminSetUserPassword
     await expect(

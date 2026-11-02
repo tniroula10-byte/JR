@@ -7,9 +7,10 @@ import { getDataRepository } from '@/lib/data';
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
-  const expectedSecret = process.env.CRON_SECRET || 'dev-cron-secret';
+  const expectedSecret = process.env.CRON_SECRET;
 
-  if (authHeader !== `Bearer ${expectedSecret}`) {
+  // Fail closed: without a configured secret the endpoint is unusable
+  if (!expectedSecret || authHeader !== `Bearer ${expectedSecret}`) {
     return NextResponse.json({ error: 'UNAUTHORIZED_CRON' }, { status: 401 });
   }
 

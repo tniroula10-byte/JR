@@ -48,7 +48,9 @@ function LoginContent() {
       ? 'This account has been suspended by administration. Access is revoked.'
       : errorParam === 'account_rejected'
         ? 'Unable to sign in with these credentials.'
-        : null
+        : errorParam === 'not_configured'
+          ? 'Sign-in is temporarily unavailable. Please contact support.'
+          : null
   );
 
   async function handlePasswordLogin(e: React.FormEvent) {

@@ -5,7 +5,13 @@
 import 'server-only';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { getDataRepository, hasLiveSupabaseKeys, type CallerContext, type Profile } from '@/lib/data';
+import {
+  getDataRepository,
+  hasLiveSupabaseKeys,
+  isDemoAuthAllowed,
+  type CallerContext,
+  type Profile
+} from '@/lib/data';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export const MOCK_SESSION_COOKIE = 'jr_mock_user_id';
@@ -14,18 +20,17 @@ export async function getCurrentProfile(): Promise<Profile | null> {
   const repo = getDataRepository();
 
   if (hasLiveSupabaseKeys()) {
-    try {
-      const supabase = await createSupabaseServerClient();
-      const {
-        data: { user }
-      } = await supabase.auth.getUser();
-      if (user) {
-        const sbProfile = await repo.getProfileById(user.id);
-        if (sbProfile) return sbProfile;
-      }
-    } catch {
-      // Fall back to session cookie when using username/password credentials
-    }
+    // Live mode: only a validated Supabase Auth session counts. No cookie fallback.
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) return null;
+    return repo.getProfileById(user.id);
+  }
+
+  if (!isDemoAuthAllowed()) {
+    return null;
   }
 
   const cookieStore = await cookies();

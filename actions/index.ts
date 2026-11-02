@@ -9,8 +9,9 @@
 
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
-import { getDataRepository } from '@/lib/data';
+import { getDataRepository, hasLiveSupabaseKeys, isDemoAuthAllowed } from '@/lib/data';
 import { requireActiveSession, MOCK_SESSION_COOKIE } from '@/lib/auth/session';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { checkRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
 import {
   AppSettingsUpdateSchema,
@@ -32,24 +33,13 @@ import {
   UpdateCustomerProfileSchema
 } from '@/lib/validation/schemas';
 
-export async function switchMockPersonaAction(userId: string) {
-  const cookieStore = await cookies();
-  cookieStore.set(MOCK_SESSION_COOKIE, userId, {
-    path: '/',
-    httpOnly: false,
-    sameSite: 'lax'
-  });
-  revalidatePath('/', 'layout');
-  return { ok: true, userId };
-}
-
 export async function signOutAction() {
+  if (hasLiveSupabaseKeys()) {
+    const supabase = await createSupabaseServerClient();
+    await supabase.auth.signOut();
+  }
   const cookieStore = await cookies();
-  cookieStore.set(MOCK_SESSION_COOKIE, 'anon', {
-    path: '/',
-    httpOnly: false,
-    sameSite: 'lax'
-  });
+  cookieStore.delete(MOCK_SESSION_COOKIE);
   revalidatePath('/', 'layout');
   return { ok: true };
 }
@@ -99,6 +89,16 @@ export async function verifyEmailOtpAndSetPasswordAction(rawInput: {
   fullName?: string;
   phone?: string;
 }) {
+  const rl = checkRateLimit(
+    `otp:${rawInput.email.trim().toLowerCase()}`,
+    RATE_LIMIT_PRESETS.LOGIN_EMAIL
+  );
+  if (!rl.allowed) {
+    return { ok: false, error: 'Too many attempts. Please wait 15 minutes and try again.' };
+  }
+  if (!hasLiveSupabaseKeys() && !isDemoAuthAllowed()) {
+    return { ok: false, error: 'Account setup is not available: the server is not configured.' };
+  }
   try {
     const repo = getDataRepository();
     const profile = await repo.verifyEmailOtpAndSetPassword(rawInput);
@@ -123,7 +123,28 @@ export async function loginWithPasswordAction(rawInput: {
   email: string;
   password: string;
 }) {
+  const rl = checkRateLimit(
+    `password-login:${rawInput.email.trim().toLowerCase()}`,
+    RATE_LIMIT_PRESETS.LOGIN_EMAIL
+  );
+  if (!rl.allowed) {
+    return {
+      ok: false,
+      code: 'INVALID_CREDENTIALS' as const,
+      error: 'Too many sign-in attempts. Please wait 15 minutes and try again.'
+    };
+  }
+
+  if (!hasLiveSupabaseKeys() && !isDemoAuthAllowed()) {
+    return {
+      ok: false,
+      code: 'INVALID_CREDENTIALS' as const,
+      error: 'Sign-in is not available: the server is not configured.'
+    };
+  }
+
   const repo = getDataRepository();
+  // In live mode this sets the Supabase Auth session cookies itself
   const res = await repo.authenticateWithPassword(rawInput);
   if (!res.ok || !res.profile) {
     return {
@@ -133,12 +154,14 @@ export async function loginWithPasswordAction(rawInput: {
     };
   }
 
-  const cookieStore = await cookies();
-  cookieStore.set(MOCK_SESSION_COOKIE, res.profile.id, {
-    path: '/',
-    httpOnly: false,
-    sameSite: 'lax'
-  });
+  if (isDemoAuthAllowed()) {
+    const cookieStore = await cookies();
+    cookieStore.set(MOCK_SESSION_COOKIE, res.profile.id, {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax'
+    });
+  }
   revalidatePath('/', 'layout');
 
   const redirectPath =

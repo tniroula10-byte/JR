@@ -2,11 +2,26 @@
 
 > **Resume Protocol**: At the start of any session, read `AGENTS.md` and this file (`docs/PROGRESS.md`), verify the current test suite status, and continue immediately with the **Next Action** below.
 
-## Current Status Summary
+## Current Status Summary (updated 2026-11-03, launch-hardening plan)
 
-- **Current Phase**: **ALL PHASES COMPLETED (Phase A + Phases 0–11)**
-- **Environment Mode**: Dual-Adapter Ready (`lib/data/mock/` active by default; automatically switches to `lib/data/supabase/` when `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are configured in `.env.local` per `docs/HUMAN-TODO.md`).
-- **Next Action**: None — full brief is complete and verified. See `docs/FINAL-REPORT.md` for summary and `docs/HUMAN-TODO.md` for live credential provisioning steps.
+> The "ALL PHASES COMPLETED" claim below was inaccurate. A 2026-11-03 audit found the Supabase
+> adapter delegates almost every method to the in-memory mock, and authentication could be
+> bypassed. Work now follows a 7-step launch plan (branch per step, approval between steps).
+
+| Step | Scope | Status |
+| :--- | :--- | :--- |
+| 1 | Auth lockdown: remove `?as=` / persona-action / default-customer backdoors in live mode, real Supabase password + OTP auth in the adapter, fail closed without keys, remove `jr-live-db` state dump, cron secret fail-closed | ✅ Done (`fix/step1-auth-lockdown`) |
+| 2 | Real Supabase adapter: replace every `this.fallback` call with Postgres queries / RPCs; add missing RPCs (`respond_to_offer`, `withdraw_offer`, `reply_ticket`, invite) | ⏳ Next |
+| 3 | RLS fixes: remove direct customer UPDATE/INSERT on offers, tickets, conversations, spin_bonuses; hide staff ids from customers; Realtime publication; drop spin bonus | ⏳ |
+| 4 | Real DB tests against local Supabase (needs Docker) + fix stale E2E name expectations | ⏳ |
+| 5 | Upgrade Next.js & vulnerable deps, durable rate limiting, regenerate `apply_all.sql` | ⏳ |
+| 6 | Resend email, signed uploads, Web Push, Sentry | ⏳ |
+| 7 | Staging deploy, 3-role walkthrough, production | ⏳ |
+
+- **Step 1 verification**: `tsc` clean; Vitest 40/40 (incl. 11 new tests in `tests/unit/auth-lockdown.test.ts`); security lint clean; `next build` OK; live `next start` probes confirm `?as=boss-1` and a forged `jr_mock_user_id=boss-1` cookie redirect to `/login` (live keys) or `/login?error=not_configured` (no keys).
+- **Known issues**: Live mode logs in through real Supabase Auth, but all other data calls still go to the mock (step 2), so the live app is non-functional until step 2 — by design it now fails closed instead of silently using demo data. Playwright: 1/3 pass; 2 failures pre-date step 1 (tests expect demo names "Aarav Mehta"/"Vikram Singh" that commit `676e5a1` removed).
+- **Operator**: check Supabase Storage for a `jr-live-db` bucket (may contain a full state dump incl. plaintext demo passwords) and delete it; install Docker Desktop for step 4.
+- **Next Action**: Start step 2 after operator approval.
 
 ---
 

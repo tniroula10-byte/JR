@@ -6,7 +6,9 @@
  * Falls back cleanly or throws typed errors if called without live credentials.
  */
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { MockDataRepository } from '@/lib/data/mock';
+import { validateBasicPasswordFormat } from '@/lib/validation/schemas';
 import type {
   ActivityEvent,
   AnnouncementPriority,
@@ -50,66 +52,57 @@ import type {
   UserStatus
 } from '@/lib/data/types';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped PostgREST row
+function mapProfileRow(data: any): Profile {
+  return {
+    id: data.id,
+    role: data.role,
+    status: data.status,
+    username: data.username ?? undefined,
+    fullName: data.full_name,
+    email: data.email,
+    phone: data.phone,
+    avatarPath: data.avatar_path,
+    invitedBy: data.invited_by,
+    approvedBy: data.approved_by ?? null,
+    approvedAt: data.approved_at ?? null,
+    createdAt: data.created_at,
+    lastSeenAt: data.last_seen_at
+  };
+}
+
+const INVALID_CREDENTIALS: PasswordAuthResult = {
+  ok: false,
+  code: 'INVALID_CREDENTIALS',
+  error: 'Invalid email or password.'
+};
+
 export class SupabaseDataRepository implements DataRepository {
   readonly mode = 'supabase' as const;
   private fallback = new MockDataRepository();
 
+  // Identity lookups never fall back to mock data: a missing row means "no access".
   async getProfileById(userId: string): Promise<Profile | null> {
-    try {
-      const supabase = await createSupabaseServerClient();
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-      if (!error && data) {
-        return {
-          id: data.id,
-          role: data.role,
-          status: data.status,
-          username: data.username ?? undefined,
-          fullName: data.full_name,
-          email: data.email,
-          phone: data.phone,
-          avatarPath: data.avatar_path,
-          invitedBy: data.invited_by,
-          createdAt: data.created_at,
-          lastSeenAt: data.last_seen_at
-        };
-      }
-    } catch {
-      // Fallback below
-    }
-    return this.fallback.getProfileById(userId);
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return mapProfileRow(data);
   }
 
   async getProfileByEmail(email: string): Promise<Profile | null> {
-    try {
-      const supabase = await createSupabaseServerClient();
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .ilike('email', email.trim())
-        .maybeSingle();
-      if (!error && data) {
-        return {
-          id: data.id,
-          role: data.role,
-          status: data.status,
-          username: data.username ?? undefined,
-          fullName: data.full_name,
-          email: data.email,
-          phone: data.phone,
-          avatarPath: data.avatar_path,
-          invitedBy: data.invited_by,
-          createdAt: data.created_at,
-          lastSeenAt: data.last_seen_at
-        };
-      }
-    } catch {
-      // Fallback below
-    }
-    return this.fallback.getProfileByEmail(email);
+    const supabase = await createSupabaseServerClient();
+    // `email` is citext, so `eq` is case-insensitive without `ilike` wildcard injection
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('email', email.trim())
+      .maybeSingle();
+    if (error || !data) return null;
+    return mapProfileRow(data);
   }
 
   async listAllProfiles(caller: CallerContext): Promise<Profile[]> {
@@ -151,15 +144,47 @@ export class SupabaseDataRepository implements DataRepository {
     caller: CallerContext,
     input: { currentPassword?: string; newPassword: string }
   ): Promise<void> {
-    try {
-      const supabase = await createSupabaseServerClient();
-      await supabase.auth.updateUser({ password: input.newPassword });
-    } catch {
-      // Fallback to mock state when running without live Supabase Auth
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user?.email || user.id !== caller.userId) {
+      throw new Error('FORBIDDEN: No active session.');
     }
-    return this.fallback.changeCustomerPassword(caller, input);
+
+    // Re-verify the current password before allowing a change
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email: user.email,
+      password: input.currentPassword ?? ''
+    });
+    if (verifyError) {
+      throw new Error('INVALID_PASSWORD: Current password does not match.');
+    }
+
+    const formatCheck = validateBasicPasswordFormat(input.newPassword);
+    if (!formatCheck.valid) {
+      throw new Error(formatCheck.error);
+    }
+
+    const { error } = await supabase.auth.updateUser({ password: input.newPassword });
+    if (error) {
+      throw new Error(`PASSWORD_UPDATE_FAILED: ${error.message}`);
+    }
+
+    const admin = createSupabaseAdminClient();
+    await admin.from('audit_log').insert({
+      actor_id: caller.userId,
+      action: 'customer_password_changed',
+      entity: 'profile',
+      entity_id: caller.userId,
+      after_meta: { passwordUpdated: true }
+    });
   }
 
+  /**
+   * Invited customers verify the 6-digit email code sent by Supabase Auth, set a password,
+   * and move to `pending_approval`. Only pre-invited emails can verify; no account is ever created here.
+   */
   async verifyEmailOtpAndSetPassword(input: {
     email: string;
     otpCode: string;
@@ -167,14 +192,130 @@ export class SupabaseDataRepository implements DataRepository {
     fullName?: string;
     phone?: string;
   }): Promise<Profile> {
-    return this.fallback.verifyEmailOtpAndSetPassword(input);
+    const formatCheck = validateBasicPasswordFormat(input.password);
+    if (!formatCheck.valid) {
+      throw new Error(formatCheck.error);
+    }
+
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: input.email.trim().toLowerCase(),
+      token: input.otpCode.trim(),
+      type: 'email'
+    });
+    if (error || !data.user) {
+      throw new Error('INVALID_OTP: Invalid or expired email OTP code.');
+    }
+
+    const admin = createSupabaseAdminClient();
+    const { data: row } = await admin
+      .from('profiles')
+      .select('*')
+      .eq('id', data.user.id)
+      .maybeSingle();
+
+    if (
+      !row ||
+      row.role !== 'customer' ||
+      (row.status !== 'invited' && row.status !== 'pending_approval')
+    ) {
+      await supabase.auth.signOut();
+      throw new Error('INVALID_OTP: Invalid or expired email OTP code.');
+    }
+
+    const { error: pwError } = await supabase.auth.updateUser({ password: input.password });
+    // The customer must wait for staff approval before their first real session
+    await supabase.auth.signOut();
+    if (pwError) {
+      throw new Error(`PASSWORD_UPDATE_FAILED: ${pwError.message}`);
+    }
+
+    const { data: updated, error: updateError } = await admin
+      .from('profiles')
+      .update({
+        status: 'pending_approval',
+        ...(input.fullName?.trim() ? { full_name: input.fullName.trim() } : {}),
+        ...(input.phone?.trim() ? { phone: input.phone.trim() } : {})
+      })
+      .eq('id', row.id)
+      .select('*')
+      .single();
+    if (updateError || !updated) {
+      throw new Error('ACCOUNT_UPDATE_FAILED: Could not complete account setup.');
+    }
+
+    await admin
+      .from('invitations')
+      .update({ status: 'accepted', accepted_at: new Date().toISOString() })
+      .eq('email', row.email)
+      .eq('status', 'pending');
+
+    return mapProfileRow(updated);
   }
 
+  /**
+   * Signs in through Supabase Auth (bcrypt-hashed passwords, httpOnly session cookies).
+   * Accepts a username or email. Account state is revealed only after the password is correct.
+   */
   async authenticateWithPassword(input: {
     email: string;
     password: string;
   }): Promise<PasswordAuthResult> {
-    return this.fallback.authenticateWithPassword(input);
+    const admin = createSupabaseAdminClient();
+    let email = input.email.trim().toLowerCase();
+
+    if (!email.includes('@')) {
+      const { data: byUsername } = await admin
+        .from('profiles')
+        .select('email')
+        .eq('username', email)
+        .maybeSingle();
+      if (!byUsername) return INVALID_CREDENTIALS;
+      email = byUsername.email;
+    }
+
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password: input.password
+    });
+    if (error || !data.user) return INVALID_CREDENTIALS;
+
+    const { data: row } = await admin
+      .from('profiles')
+      .select('*')
+      .eq('id', data.user.id)
+      .maybeSingle();
+
+    if (!row || row.status !== 'active') {
+      await supabase.auth.signOut();
+      if (row?.status === 'pending_approval' || row?.status === 'invited') {
+        return {
+          ok: false,
+          code: 'PENDING_APPROVAL',
+          error: 'Your account is awaiting approval. You will receive an email once approved.'
+        };
+      }
+      if (row?.status === 'suspended') {
+        return {
+          ok: false,
+          code: 'ACCOUNT_SUSPENDED',
+          error: 'This account has been suspended by administration.'
+        };
+      }
+      return {
+        ok: false,
+        code: 'ACCOUNT_REJECTED',
+        error: 'Unable to sign in with these credentials.'
+      };
+    }
+
+    await admin
+      .from('profiles')
+      .update({ last_seen_at: new Date().toISOString() })
+      .eq('id', row.id);
+
+    return { ok: true, code: 'SUCCESS', profile: mapProfileRow(row) };
   }
 
   async adminSetUserPassword(

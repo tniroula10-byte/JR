@@ -59,16 +59,3 @@ export async function syncUserToSupabaseAuth(input: {
     // Graceful no-op when running in unit tests or offline
   }
 }
-
-export async function syncStateToSupabaseStorage(state: unknown): Promise<void> {
-  try {
-    const admin = createSupabaseAdminClient();
-    const payload = JSON.stringify(state, null, 2);
-    await admin.storage.from('jr-live-db').upload('state.json', payload, {
-      contentType: 'application/json',
-      upsert: true
-    });
-  } catch {
-    // Graceful no-op when running in unit tests or offline
-  }
-}

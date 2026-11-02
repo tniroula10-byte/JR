@@ -101,15 +101,6 @@ function saveState(state: MockDatabaseState): void {
       // Ignore write errors in read-only environments
     }
   }
-  if (
-    process.env.NEXT_PUBLIC_SUPABASE_URL?.startsWith('https://') &&
-    process.env.NODE_ENV !== 'test' &&
-    !process.env.VITEST
-  ) {
-    import('@/lib/supabase/admin')
-      .then(({ syncStateToSupabaseStorage }) => syncStateToSupabaseStorage(state))
-      .catch(() => {});
-  }
 }
 
 export function resetMockState(): void {
@@ -361,12 +352,16 @@ export class MockDataRepository implements DataRepository {
       throw new Error('INVALID_OTP: Invalid or expired email OTP code.');
     }
     const nowIso = new Date().toISOString();
-    let profile = state.profiles.find((p) => p.email.toLowerCase() === cleanEmail);
+    const profile = state.profiles.find((p) => p.email.toLowerCase() === cleanEmail);
 
-    if (profile && profile.role !== 'customer') {
-      throw new Error(
-        'FORBIDDEN: Employee and Boss passwords are set directly by BOKA. Email OTP is for customers only.'
-      );
+    // Only pre-invited, not-yet-approved customers may verify. Never create accounts here,
+    // and use one generic error so the form cannot be used to discover registered emails.
+    if (
+      !profile ||
+      profile.role !== 'customer' ||
+      (profile.status !== 'invited' && profile.status !== 'pending_approval')
+    ) {
+      throw new Error('INVALID_OTP: Invalid or expired email OTP code.');
     }
 
     const formatCheck = validateBasicPasswordFormat(input.password);
@@ -374,55 +369,13 @@ export class MockDataRepository implements DataRepository {
       throw new Error(formatCheck.error);
     }
 
-    if (!profile) {
-      const newId = `cust-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      profile = {
-        id: newId,
-        role: 'customer',
-        status: 'pending_approval',
-        username: cleanEmail.split('@')[0],
-        fullName: input.fullName?.trim() || cleanEmail.split('@')[0] || 'Customer',
-        email: cleanEmail,
-        phone: input.phone?.trim() || null,
-        avatarPath: null,
-        invitedBy: null,
-        approvedBy: null,
-        approvedAt: null,
-        createdAt: nowIso,
-        lastSeenAt: null
-      };
-      state.profiles.push(profile);
-
-      state.conversations.push({
-        id: `conv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        customerId: newId,
-        customerName: profile.fullName,
-        customerEmail: profile.email,
-        handledBy: null,
-        handledByName: null,
-        handledByAlias: null,
-        awaitingStaff: false,
-        lastMessageAt: null,
-        lastMessagePreview: null,
-        customerLastReadAt: null,
-        staffLastReadAt: null,
-        customerUnreadCount: 0,
-        staffUnreadCount: 0,
-        createdAt: nowIso
-      });
-    } else {
-      // After a customer verifies their email OTP and sets a password, their status becomes PENDING_APPROVAL instead of ACTIVE
-      if (!profile.approvedAt && profile.status !== 'active') {
-        profile.status = 'pending_approval';
-      } else if (profile.role === 'customer' && !profile.approvedAt) {
-        profile.status = 'pending_approval';
-      }
-      if (input.fullName?.trim()) {
-        profile.fullName = input.fullName.trim();
-      }
-      if (input.phone?.trim()) {
-        profile.phone = input.phone.trim();
-      }
+    // After a customer verifies their email OTP and sets a password, their status becomes PENDING_APPROVAL instead of ACTIVE
+    profile.status = 'pending_approval';
+    if (input.fullName?.trim()) {
+      profile.fullName = input.fullName.trim();
+    }
+    if (input.phone?.trim()) {
+      profile.phone = input.phone.trim();
     }
 
     if (!state.customerPasswords) {
@@ -597,7 +550,7 @@ export class MockDataRepository implements DataRepository {
 
     const nowIso = new Date().toISOString();
     const expiresIso = new Date(Date.now() + 7 * 24 * 3600_000).toISOString();
-    const newId = `${input.intendedRole === 'employee' ? 'emp' : 'cust'}-${Date.now()}`;
+    const newId = `${input.intendedRole === 'employee' ? 'emp' : 'cust'}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
     if (input.initialPassword?.trim()) {
       const formatCheck = validateBasicPasswordFormat(input.initialPassword.trim());
@@ -644,7 +597,7 @@ export class MockDataRepository implements DataRepository {
         updatedAt: nowIso
       });
       state.staffThreads.push({
-        id: `sthread-${Date.now()}`,
+        id: `sthread-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         employeeId: newId,
         employeeName: newProfile.fullName,
         employeeAlias: alias,
@@ -655,7 +608,7 @@ export class MockDataRepository implements DataRepository {
     } else {
       // Customer invited by employee or boss starts unassigned and visible to all staff
       state.conversations.push({
-        id: `conv-${Date.now()}`,
+        id: `conv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         customerId: newId,
         customerName: newProfile.fullName,
         customerEmail: newProfile.email,
@@ -674,7 +627,7 @@ export class MockDataRepository implements DataRepository {
     }
 
     const invitation: Invitation = {
-      id: `inv-${Date.now()}`,
+      id: `inv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       email: cleanEmail,
       intendedRole: input.intendedRole,
       fullName: newProfile.fullName,
