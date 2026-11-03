@@ -19,8 +19,12 @@ import {
   ChangeCustomerPasswordSchema,
   CreateTicketSchema,
   CustomerAnnouncementCreateSchema,
+  CustomerPaymentTagSchema,
+  GameUpsertSchema,
   InviteUserSchema,
   MagicLinkLoginSchema,
+  PaymentMethodUpsertSchema,
+  PaymentTagUpsertSchema,
   ProductUpsertSchema,
   ReplyTicketSchema,
   RespondToOfferSchema,
@@ -29,6 +33,9 @@ import {
   StaffFlagsUpdateSchema,
   StoryCreateSchema,
   SubmitOfferSchema,
+  TopupSettingsSchema,
+  TopupStatusSchema,
+  TopupSubmitSchema,
   TransitionTicketSchema,
   UpdateCustomerProfileSchema
 } from '@/lib/validation/schemas';
@@ -740,5 +747,172 @@ export async function sendComplaintChatMessageAction(rawInput: {
       ok: false,
       error: err instanceof Error ? err.message : 'Complaint chat message failed'
     };
+  }
+}
+
+// ---- Game top-ups -------------------------------------------------------------
+
+function revalidateTopups() {
+  revalidatePath('/topups');
+  revalidatePath('/home');
+  revalidatePath('/chat');
+  revalidatePath('/employee/topups');
+  revalidatePath('/boss/topups');
+  revalidatePath('/employee/inbox');
+  revalidatePath('/boss/inbox');
+}
+
+export async function getTopupStartAction() {
+  const { caller } = await requireActiveSession(['customer']);
+  try {
+    const repo = getDataRepository();
+    const [games, paymentOptions, usernames] = await Promise.all([
+      repo.listGames(caller),
+      repo.getPaymentOptions(caller),
+      repo.getMyGameUsernames(caller)
+    ]);
+    return { ok: true as const, data: { games, paymentOptions, usernames } };
+  } catch (err) {
+    return { ok: false as const, error: err instanceof Error ? err.message : 'Could not load games.' };
+  }
+}
+
+export async function submitTopupAction(rawInput: {
+  gameId: string;
+  gameUsername: string;
+  amountCents: number;
+  methodId: string;
+  clientRequestId: string;
+}) {
+  const { caller } = await requireActiveSession(['customer']);
+  const parsed = TopupSubmitSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid top-up.' };
+  }
+  try {
+    const repo = getDataRepository();
+    const topup = await repo.submitTopup(caller, parsed.data);
+    revalidateTopups();
+    return { ok: true, data: topup };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Top-up request failed' };
+  }
+}
+
+export async function updateTopupStatusAction(rawInput: {
+  topupId: string;
+  status: 'loaded' | 'not_received';
+  note?: string;
+}) {
+  const { caller } = await requireActiveSession(['boss', 'employee']);
+  const parsed = TopupStatusSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid status.' };
+  }
+  try {
+    const repo = getDataRepository();
+    const topup = await repo.updateTopupStatus(caller, parsed.data);
+    revalidateTopups();
+    return { ok: true, data: topup };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Status update failed' };
+  }
+}
+
+export async function upsertGameAction(rawInput: {
+  id?: string;
+  name: string;
+  active: boolean;
+  sortOrder: number;
+}) {
+  const { caller } = await requireActiveSession(['boss', 'employee']);
+  const parsed = GameUpsertSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid game.' };
+  }
+  try {
+    const game = await getDataRepository().upsertGame(caller, parsed.data);
+    revalidateTopups();
+    return { ok: true, data: game };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Saving game failed' };
+  }
+}
+
+export async function upsertPaymentMethodAction(rawInput: {
+  id?: string;
+  name: string;
+  active: boolean;
+  sortOrder: number;
+}) {
+  const { caller } = await requireActiveSession(['boss', 'employee']);
+  const parsed = PaymentMethodUpsertSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid payment method.' };
+  }
+  try {
+    const method = await getDataRepository().upsertPaymentMethod(caller, parsed.data);
+    revalidateTopups();
+    return { ok: true, data: method };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Saving payment method failed' };
+  }
+}
+
+export async function upsertPaymentTagAction(rawInput: {
+  id?: string;
+  methodId: string;
+  tag: string;
+  active: boolean;
+  sortOrder: number;
+}) {
+  const { caller } = await requireActiveSession(['boss', 'employee']);
+  const parsed = PaymentTagUpsertSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid payment tag.' };
+  }
+  try {
+    const tag = await getDataRepository().upsertPaymentTag(caller, parsed.data);
+    revalidateTopups();
+    return { ok: true, data: tag };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Saving payment tag failed' };
+  }
+}
+
+export async function setCustomerPaymentTagAction(rawInput: {
+  customerId: string;
+  methodId: string;
+  tagId: string;
+}) {
+  const { caller } = await requireActiveSession(['boss', 'employee']);
+  const parsed = CustomerPaymentTagSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid selection.' };
+  }
+  try {
+    await getDataRepository().setCustomerPaymentTag(caller, parsed.data);
+    revalidateTopups();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Assigning tag failed' };
+  }
+}
+
+export async function updateTopupSettingsAction(rawInput: {
+  paymentTagMode: 'rotate' | 'sticky';
+  paymentTagRotateEvery: number;
+}) {
+  const { caller } = await requireActiveSession(['boss']);
+  const parsed = TopupSettingsSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid settings.' };
+  }
+  try {
+    const settings = await getDataRepository().updateAppSettings(caller, parsed.data);
+    revalidateTopups();
+    return { ok: true, data: settings };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Settings update failed' };
   }
 }

@@ -103,3 +103,14 @@ This creates the single `boss` account with your password. Running it again chan
 4. Deploy. Vercel Cron Jobs (`vercel.json`) will automatically schedule:
    - `/api/cron/auto-close-tickets` (runs daily to close tickets in `resolved` status older than `ticket_auto_close_days`)
    - `/api/cron/expire-stories` (runs hourly to clean up expired story media after the 24-hour window)
+
+---
+
+## Step 7: Set Up Games and Payment Tags (after launch, in the app)
+
+1. Sign in as the Boss and open **Game Top-ups**.
+2. **Games** tab: add the games customers can top up (up to 11 can be on at once).
+3. **Payment tags** tab: add up to 3 payment methods (e.g. Cash App, Venmo, Zelle) and at least one tag for each.
+4. **Tag rule** tab: choose "Rotate after N deposits" or "Same tag per customer".
+5. Confirm with your payment providers that receiving business payments on these accounts is allowed; rotating personal accounts can get them frozen.
+

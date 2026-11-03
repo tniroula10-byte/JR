@@ -197,3 +197,52 @@ export const UploadSignRequestSchema = z.object({
   },
   { message: 'Images must be <= 5 MB and videos <= 15 MB (story-media only)' }
 );
+
+// ---- Game top-ups -------------------------------------------------------------
+
+export const GameUpsertSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().trim().min(1, 'Game name is required.').max(60),
+  active: z.boolean(),
+  sortOrder: z.number().int().min(0).max(999)
+});
+
+export const PaymentMethodUpsertSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().trim().min(1, 'Payment method name is required.').max(40),
+  active: z.boolean(),
+  sortOrder: z.number().int().min(0).max(999)
+});
+
+export const PaymentTagUpsertSchema = z.object({
+  id: z.string().optional(),
+  methodId: z.string().min(1),
+  tag: z.string().trim().min(1, 'Payment tag is required.').max(80),
+  active: z.boolean(),
+  sortOrder: z.number().int().min(0).max(999)
+});
+
+export const CustomerPaymentTagSchema = z.object({
+  customerId: z.string().min(1),
+  methodId: z.string().min(1),
+  tagId: z.string().min(1)
+});
+
+export const TopupSubmitSchema = z.object({
+  gameId: z.string().min(1),
+  gameUsername: z.string().trim().min(1, 'Enter your username for this game.').max(80),
+  amountCents: z.number().int().min(100, 'Minimum top-up is $1.').max(500_000_000),
+  methodId: z.string().min(1, 'Choose a payment method.'),
+  clientRequestId: z.string().min(8).max(80)
+});
+
+export const TopupStatusSchema = z.object({
+  topupId: z.string().min(1),
+  status: z.enum(['loaded', 'not_received']),
+  note: z.string().trim().max(500).optional()
+});
+
+export const TopupSettingsSchema = z.object({
+  paymentTagMode: z.enum(['rotate', 'sticky']),
+  paymentTagRotateEvery: z.number().int().min(1).max(100)
+});

@@ -256,6 +256,58 @@ test('tickets: customer raises, boss assigns, employee replies anonymously', asy
   expect(html).not.toContain(people.employeeEmail);
 });
 
+test('top-up: customer picks a game, amount and payment tag; employee marks it loaded', async ({ browser }) => {
+  const gameName = `Top Game ${RUN}`;
+  const { data: game } = await admin
+    .from('games')
+    .insert({ name: gameName, active: true, sort_order: 0, created_by: people.bossId })
+    .select('id')
+    .single();
+  const { data: method } = await admin
+    .from('payment_methods')
+    .insert({ name: `CashTest ${RUN}`, active: true, sort_order: 0 })
+    .select('id')
+    .single();
+  const tag = `$jr${RUN}`;
+  await admin.from('payment_tags').insert({ method_id: method!.id, tag, active: true, sort_order: 1 });
+  // Keep this test's method within the 3-active limit
+  await admin.from('payment_methods').update({ active: false }).neq('id', method!.id);
+
+  const customer = await signInUi(browser, people.customerEmail, PASSWORD);
+  await customer.setViewportSize({ width: 390, height: 844 });
+  await customer.goto('/topups');
+  await customer.getByRole('button', { name: 'Games' }).first().click();
+  await customer.getByRole('dialog').getByRole('button', { name: gameName }).click();
+  await customer.fill('#topup-username', 'ace_player');
+  await customer.fill('#topup-amount', '40');
+  await customer.getByRole('button', { name: 'Next' }).click();
+  await customer.getByRole('radio', { name: new RegExp(tag.replace('$', '\\$')) }).click();
+  await customer.screenshot({ path: 'docs/screenshots/topup-payment-mobile-390.png' });
+  await customer.getByRole('button', { name: 'Send request' }).click();
+  await expect(customer.getByRole('dialog')).toContainText(/Request #\d+ sent/);
+
+  const { data: req } = await admin
+    .from('topup_requests')
+    .select('id, ref_no, tag_text, amount_cents, game_username')
+    .eq('customer_id', people.customerId)
+    .eq('game_id', game!.id)
+    .single();
+  expect(req).toMatchObject({ tag_text: tag, amount_cents: 4000, game_username: 'ace_player' });
+
+  const employee = await signInUi(browser, people.employeeEmail, PASSWORD);
+  await employee.goto('/employee/topups');
+  const card = employee.locator('div', { hasText: `#${req!.ref_no}` }).filter({ has: employee.getByRole('button', { name: 'Loaded' }) }).last();
+  await expect(card).toContainText('ace_player');
+  await card.getByRole('button', { name: 'Loaded' }).click();
+  await expect(employee.getByRole('status').filter({ hasText: 'marked Loaded' })).toBeVisible();
+
+  await customer.goto('/topups');
+  await expect(customer.getByText('Loaded').first()).toBeVisible();
+  await customer.goto('/chat');
+  await expect(customer.getByText(/has been loaded/).first()).toBeVisible();
+  expect(await customer.content()).not.toContain(people.employeeId);
+});
+
 test('suspension locks the customer out on the next page load', async ({ browser }) => {
   const customer = await signInUi(browser, people.customerEmail, PASSWORD);
   await admin.from('profiles').update({ status: 'suspended' }).eq('id', people.customerId);

@@ -32,11 +32,15 @@ import type {
   DataRepository,
   EmployeePerformanceMetrics,
   EmployeeWithFlags,
+  Game,
   Invitation,
   Offer,
   OfferEvent,
   OutboundEmailNotice,
   PasswordAuthResult,
+  PaymentMethod,
+  PaymentOption,
+  PaymentTag,
   PerformanceQueryFilter,
   Product,
   ProductStatus,
@@ -55,6 +59,7 @@ import type {
   TicketEvent,
   TicketPriority,
   TicketStatus,
+  TopupRequest,
   UserStatus
 } from '@/lib/data/types';
 
@@ -2891,6 +2896,402 @@ export class MockDataRepository implements DataRepository {
     const purged = beforeCount - state.stories.length;
     if (purged > 0) saveState(state);
     return purged;
+  }
+
+  // ---- Game Top-ups (mirrors supabase/migrations/00004_game_topups.sql) ----
+
+  private topupState(state: MockDatabaseState) {
+    state.games ??= [];
+    state.paymentMethods ??= [];
+    state.paymentTags ??= [];
+    state.customerPaymentTags ??= [];
+    state.customerGameAccounts ??= [];
+    state.topups ??= [];
+    return state as Required<MockDatabaseState>;
+  }
+
+  /** Same rules as resolve_payment_tag(): rotate after N deposits, or sticky per customer. */
+  private resolvePaymentTag(
+    state: Required<MockDatabaseState>,
+    customerId: string,
+    methodId: string,
+    consume: boolean
+  ) {
+    const method = state.paymentMethods.find((m) => m.id === methodId && m.active);
+    if (!method) throw new Error('NOT_FOUND: Payment method is not available.');
+    const activeTags = state.paymentTags
+      .filter((t) => t.methodId === methodId && t.active)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    if (activeTags.length === 0) throw new Error('NOT_FOUND: No active payment tag for this method.');
+
+    let tag;
+    if (state.appSettings.paymentTagMode === 'sticky') {
+      const assigned = state.customerPaymentTags.find(
+        (c) => c.customerId === customerId && c.methodId === methodId
+      );
+      tag = assigned ? activeTags.find((t) => t.id === assigned.tagId) : undefined;
+      if (!tag) {
+        const load = (id: string) => state.customerPaymentTags.filter((c) => c.tagId === id).length;
+        tag = [...activeTags].sort((a, b) => load(a.id) - load(b.id))[0]!;
+        state.customerPaymentTags = state.customerPaymentTags.filter(
+          (c) => !(c.customerId === customerId && c.methodId === methodId)
+        );
+        state.customerPaymentTags.push({ customerId, methodId, tagId: tag.id });
+      }
+    } else {
+      tag = activeTags.find((t) => t.id === method.currentTagId);
+      if (!tag) {
+        tag = activeTags[0]!;
+        method.currentTagId = tag.id;
+        method.depositsOnCurrent = 0;
+      }
+      if (consume) {
+        if (method.depositsOnCurrent + 1 >= state.appSettings.paymentTagRotateEvery) {
+          const idx = activeTags.findIndex((t) => t.id === tag!.id);
+          method.currentTagId = activeTags[(idx + 1) % activeTags.length]!.id;
+          method.depositsOnCurrent = 0;
+        } else {
+          method.depositsOnCurrent += 1;
+        }
+      }
+    }
+    if (consume) tag.depositCount += 1;
+    return { method, tag };
+  }
+
+  async listGames(caller: CallerContext): Promise<Game[]> {
+    const state = this.topupState(getState());
+    const p = assertActiveCaller(state, caller);
+    return state.games
+      .filter((g) => g.active || p.role !== 'customer')
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+      .map((g) => ({ ...g }));
+  }
+
+  async upsertGame(
+    caller: CallerContext,
+    input: { id?: string; name: string; active: boolean; sortOrder: number }
+  ): Promise<Game> {
+    const state = this.topupState(getState());
+    assertStaff(state, caller);
+    const name = input.name.trim();
+    if (!name) throw new Error('INVALID_INPUT: Game name is required.');
+    if (input.active && state.games.filter((g) => g.active && g.id !== input.id).length >= 11) {
+      throw new Error('LIMIT_REACHED: At most 11 games can be active. Turn one off first.');
+    }
+    let game = input.id ? state.games.find((g) => g.id === input.id) : undefined;
+    if (input.id && !game) throw new Error('NOT_FOUND: Game not found.');
+    if (game) {
+      Object.assign(game, { name, active: input.active, sortOrder: input.sortOrder });
+    } else {
+      game = { id: `game-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name, active: input.active, sortOrder: input.sortOrder };
+      state.games.push(game);
+    }
+    saveState(state);
+    return { ...game };
+  }
+
+  async listPaymentMethods(caller: CallerContext): Promise<PaymentMethod[]> {
+    const state = this.topupState(getState());
+    assertStaff(state, caller);
+    return [...state.paymentMethods]
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((m) => ({
+        id: m.id,
+        name: m.name,
+        active: m.active,
+        sortOrder: m.sortOrder,
+        tags: state.paymentTags
+          .filter((t) => t.methodId === m.id)
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+          .map((t) => ({ ...t, isCurrent: t.id === m.currentTagId }))
+      }));
+  }
+
+  async upsertPaymentMethod(
+    caller: CallerContext,
+    input: { id?: string; name: string; active: boolean; sortOrder: number }
+  ): Promise<PaymentMethod> {
+    const state = this.topupState(getState());
+    assertStaff(state, caller);
+    const name = input.name.trim();
+    if (!name) throw new Error('INVALID_INPUT: Payment method name is required.');
+    if (input.active && state.paymentMethods.filter((m) => m.active && m.id !== input.id).length >= 3) {
+      throw new Error('LIMIT_REACHED: At most 3 payment methods can be active. Turn one off first.');
+    }
+    let method = input.id ? state.paymentMethods.find((m) => m.id === input.id) : undefined;
+    if (input.id && !method) throw new Error('NOT_FOUND: Payment method not found.');
+    if (method) {
+      Object.assign(method, { name, active: input.active, sortOrder: input.sortOrder });
+    } else {
+      method = {
+        id: `pm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name,
+        active: input.active,
+        sortOrder: input.sortOrder,
+        currentTagId: null,
+        depositsOnCurrent: 0
+      };
+      state.paymentMethods.push(method);
+    }
+    saveState(state);
+    return (await this.listPaymentMethods(caller)).find((m) => m.id === method!.id)!;
+  }
+
+  async upsertPaymentTag(
+    caller: CallerContext,
+    input: { id?: string; methodId: string; tag: string; active: boolean; sortOrder: number }
+  ): Promise<PaymentTag> {
+    const state = this.topupState(getState());
+    assertStaff(state, caller);
+    const text = input.tag.trim();
+    if (!text) throw new Error('INVALID_INPUT: Payment tag is required.');
+    const method = state.paymentMethods.find((m) => m.id === input.methodId);
+    if (!method) throw new Error('NOT_FOUND: Payment method not found.');
+    let tag = input.id
+      ? state.paymentTags.find((t) => t.id === input.id && t.methodId === input.methodId)
+      : undefined;
+    if (input.id && !tag) throw new Error('NOT_FOUND: Payment tag not found.');
+    if (tag) {
+      Object.assign(tag, { tag: text, active: input.active, sortOrder: input.sortOrder });
+    } else {
+      tag = {
+        id: `tag-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        methodId: input.methodId,
+        tag: text,
+        active: input.active,
+        sortOrder: input.sortOrder,
+        depositCount: 0
+      };
+      state.paymentTags.push(tag);
+    }
+    saveState(state);
+    return { ...tag, isCurrent: tag.id === method.currentTagId };
+  }
+
+  async setCustomerPaymentTag(
+    caller: CallerContext,
+    input: { customerId: string; methodId: string; tagId: string }
+  ): Promise<void> {
+    const state = this.topupState(getState());
+    assertStaff(state, caller);
+    if (!state.profiles.some((p) => p.id === input.customerId && p.role === 'customer')) {
+      throw new Error('NOT_FOUND: Customer not found.');
+    }
+    if (!state.paymentTags.some((t) => t.id === input.tagId && t.methodId === input.methodId && t.active)) {
+      throw new Error('NOT_FOUND: Active payment tag not found for this method.');
+    }
+    state.customerPaymentTags = state.customerPaymentTags.filter(
+      (c) => !(c.customerId === input.customerId && c.methodId === input.methodId)
+    );
+    state.customerPaymentTags.push({ ...input });
+    saveState(state);
+  }
+
+  async getPaymentOptions(caller: CallerContext): Promise<PaymentOption[]> {
+    const state = this.topupState(getState());
+    const customer = assertCustomer(state, caller);
+    const options = [...state.paymentMethods]
+      .filter((m) => m.active && state.paymentTags.some((t) => t.methodId === m.id && t.active))
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((m) => {
+        const { tag } = this.resolvePaymentTag(state, customer.id, m.id, false);
+        return { methodId: m.id, methodName: m.name, tag: tag.tag };
+      });
+    saveState(state);
+    return options;
+  }
+
+  async getMyGameUsernames(caller: CallerContext): Promise<Record<string, string>> {
+    const state = this.topupState(getState());
+    const customer = assertCustomer(state, caller);
+    return Object.fromEntries(
+      state.customerGameAccounts
+        .filter((a) => a.customerId === customer.id)
+        .map((a) => [a.gameId, a.username])
+    );
+  }
+
+  async submitTopup(
+    caller: CallerContext,
+    input: {
+      gameId: string;
+      gameUsername: string;
+      amountCents: number;
+      methodId: string;
+      clientRequestId: string;
+    }
+  ): Promise<TopupRequest> {
+    const state = this.topupState(getState());
+    const customer = assertCustomer(state, caller);
+    const existing = state.topups.find(
+      (t) => t.customerId === customer.id && t.id.endsWith(`-${input.clientRequestId}`)
+    );
+    if (existing) return { ...existing, handledBy: null, handledByName: null };
+
+    const rl = checkRateLimit(`topup:${customer.id}`, { windowMs: 3_600_000, maxRequests: 10 });
+    if (!rl.allowed) throw new Error('RATE_LIMITED: Too many top-up requests in a short time.');
+
+    const game = state.games.find((g) => g.id === input.gameId && g.active);
+    if (!game) throw new Error('NOT_FOUND: This game is not available.');
+    const username = input.gameUsername.trim();
+    if (!username) throw new Error('INVALID_INPUT: Game username is required.');
+    if (
+      !Number.isInteger(input.amountCents) ||
+      input.amountCents < 100 ||
+      input.amountCents > state.appSettings.offerSanityMaxPaise
+    ) {
+      throw new Error(
+        `INVALID_AMOUNT: Amount must be between $1 and ${formatPaiseToINR(state.appSettings.offerSanityMaxPaise)}.`
+      );
+    }
+    const conv = state.conversations.find((c) => c.customerId === customer.id);
+    if (!conv) throw new Error('NOT_FOUND: Customer conversation not found.');
+
+    const { method, tag } = this.resolvePaymentTag(state, customer.id, input.methodId, true);
+    state.customerGameAccounts = state.customerGameAccounts.filter(
+      (a) => !(a.customerId === customer.id && a.gameId === game.id)
+    );
+    state.customerGameAccounts.push({ customerId: customer.id, gameId: game.id, username });
+
+    const nowIso = new Date().toISOString();
+    const refNo = state.topups.reduce((max, t) => Math.max(max, t.refNo), 100) + 1;
+    const request: TopupRequest = {
+      id: `topup-${refNo}-${input.clientRequestId}`,
+      refNo,
+      customerId: customer.id,
+      customerName: customer.fullName,
+      conversationId: conv.id,
+      gameId: game.id,
+      gameName: game.name,
+      gameUsername: username,
+      amountCents: input.amountCents,
+      methodName: method.name,
+      tag: tag.tag,
+      status: 'waiting',
+      staffNote: null,
+      handledBy: null,
+      handledByName: null,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+    state.topups.unshift(request);
+
+    const body = `Top-up request #${refNo}: ${formatPaiseToINR(input.amountCents)} on ${game.name} (username: ${username}), paid via ${method.name} to ${tag.tag}.`;
+    state.messages.push({
+      id: `msg-${Date.now()}-topup`,
+      conversationId: conv.id,
+      senderKind: 'customer',
+      customerSenderId: customer.id,
+      type: 'text',
+      body,
+      offerId: null,
+      clientMsgId: `topup-${request.id}`,
+      createdAt: nowIso
+    });
+    conv.awaitingStaff = true;
+    conv.lastMessageAt = nowIso;
+    conv.lastMessagePreview = body.slice(0, 120);
+    conv.staffUnreadCount += 1;
+
+    const recipients = conv.handledBy
+      ? [conv.handledBy, 'boss-1']
+      : state.profiles.filter((p) => p.role !== 'customer' && p.status === 'active').map((p) => p.id);
+    for (const rid of new Set(recipients)) {
+      state.notifications.unshift({
+        id: `notif-${Date.now()}-${rid}-topup`,
+        recipientId: rid,
+        type: 'topup_requested',
+        title: `Top-up: ${formatPaiseToINR(input.amountCents)} on ${game.name}`,
+        body: `${customer.fullName} sent ${formatPaiseToINR(input.amountCents)} via ${method.name}. Load it to ${username}.`,
+        link: rid === 'boss-1' ? '/boss/topups' : '/employee/topups',
+        payload: { topupId: request.id },
+        readAt: null,
+        createdAt: nowIso
+      });
+    }
+
+    saveState(state);
+    return { ...request };
+  }
+
+  async listTopups(caller: CallerContext): Promise<TopupRequest[]> {
+    const state = this.topupState(getState());
+    const p = assertActiveCaller(state, caller);
+    if (p.role === 'customer') {
+      return state.topups
+        .filter((t) => t.customerId === p.id)
+        .map((t) => ({ ...t, handledBy: null, handledByName: null }));
+    }
+    return state.topups
+      .filter((t) => {
+        const conv = state.conversations.find((c) => c.id === t.conversationId);
+        return conv ? canAccessConversation(state, caller, conv) : false;
+      })
+      .map((t) => ({ ...t }));
+  }
+
+  async updateTopupStatus(
+    caller: CallerContext,
+    input: { topupId: string; status: 'loaded' | 'not_received'; note?: string }
+  ): Promise<TopupRequest> {
+    const state = this.topupState(getState());
+    const staff = assertStaff(state, caller);
+    const req = state.topups.find((t) => t.id === input.topupId);
+    if (!req) throw new Error('NOT_FOUND: Top-up request not found.');
+    const conv = state.conversations.find((c) => c.id === req.conversationId);
+    if (!conv || !canAccessConversation(state, caller, conv)) {
+      throw new Error('FORBIDDEN: Top-up is outside staff member scope.');
+    }
+    if (req.status !== 'waiting') {
+      throw new Error(`INVALID_STATE: This top-up was already marked ${req.status}.`);
+    }
+    const nowIso = new Date().toISOString();
+    req.status = input.status;
+    req.staffNote = input.note?.trim() || null;
+    req.handledBy = staff.id;
+    req.handledByName = staff.fullName;
+    req.updatedAt = nowIso;
+
+    const body =
+      (input.status === 'loaded'
+        ? `Your ${formatPaiseToINR(req.amountCents)} top-up on ${req.gameName} (#${req.refNo}) has been loaded. Enjoy!`
+        : `We could not find your ${formatPaiseToINR(req.amountCents)} payment for top-up #${req.refNo}. Please check and message us.`) +
+      (req.staffNote ? ` Note: ${req.staffNote}` : '');
+    const msgId = `msg-${Date.now()}-topupst`;
+    state.messages.push({
+      id: msgId,
+      conversationId: conv.id,
+      senderKind: 'staff',
+      customerSenderId: null,
+      type: 'text',
+      body,
+      offerId: null,
+      clientMsgId: `topup-status-${req.id}`,
+      createdAt: nowIso
+    });
+    state.messageAttributions.push({ messageId: msgId, staffId: staff.id, createdAt: nowIso });
+    conv.awaitingStaff = false;
+    conv.lastMessageAt = nowIso;
+    conv.lastMessagePreview = body.slice(0, 120);
+    conv.customerUnreadCount += 1;
+    if (!conv.handledBy && staff.role === 'employee') {
+      conv.handledBy = staff.id;
+      conv.handledByName = staff.fullName;
+    }
+    state.notifications.unshift({
+      id: `notif-${Date.now()}-${req.customerId}-topupst`,
+      recipientId: req.customerId,
+      type: `topup_${input.status}`,
+      title: input.status === 'loaded' ? 'Top-up loaded' : 'Payment not received',
+      body,
+      link: '/topups',
+      payload: { topupId: req.id },
+      readAt: null,
+      createdAt: nowIso
+    });
+    saveState(state);
+    return { ...req };
   }
 
   async listNotifications(caller: CallerContext): Promise<AppNotification[]> {

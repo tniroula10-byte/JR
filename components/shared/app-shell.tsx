@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   Coins,
   FileSpreadsheet,
+  Gamepad2,
   Home,
   Inbox,
   Layers,
@@ -50,6 +51,7 @@ export interface NavItem {
 
 const CUSTOMER_NAV: NavItem[] = [
   { href: '/home', label: 'Home', shortLabel: 'Home', icon: Home },
+  { href: '/topups', label: 'Games & Top-ups', shortLabel: 'Games', icon: Gamepad2 },
   { href: '/chat', label: 'Chat', shortLabel: 'Chat', icon: MessageSquare },
   { href: '/tickets', label: 'Raise ticket (Boka)', shortLabel: 'Raise ticket', icon: TicketIcon },
   { href: '/profile', label: 'My profile', shortLabel: 'My profile', icon: User }
@@ -58,6 +60,7 @@ const CUSTOMER_NAV: NavItem[] = [
 const EMPLOYEE_NAV: NavItem[] = [
   { href: '/employee/dashboard', label: 'My Dashboard', shortLabel: 'Desk', icon: Home },
   { href: '/employee/inbox', label: 'Customer Inbox', shortLabel: 'Inbox', icon: Inbox },
+  { href: '/employee/topups', label: 'Game Top-ups', shortLabel: 'Top-ups', icon: Gamepad2 },
   { href: '/employee/tickets', label: 'Support Tickets', shortLabel: 'Tickets', icon: TicketIcon },
   { href: '/employee/boss-chat', label: 'JR Family', shortLabel: 'JR Family', icon: Users },
   { href: '/employee/performance', label: 'My Performance', shortLabel: 'Metrics', icon: Activity },
@@ -67,6 +70,7 @@ const EMPLOYEE_NAV: NavItem[] = [
 const BOSS_NAV: NavItem[] = [
   { href: '/boss/dashboard', label: 'Master Dashboard', shortLabel: 'Master', icon: Shield },
   { href: '/boss/inbox', label: 'Shared Inbox (Real IDs)', shortLabel: 'Inbox', icon: Inbox },
+  { href: '/boss/topups', label: 'Game Top-ups', shortLabel: 'Top-ups', icon: Gamepad2 },
   { href: '/boss/tickets', label: 'All Tickets & Assign', shortLabel: 'Tickets', icon: TicketIcon },
   { href: '/boss/analytics', label: 'Staff Analytics & CSV', shortLabel: 'Analytics', icon: FileSpreadsheet },
   { href: '/boss/customers', label: 'Customers & Invites', shortLabel: 'Customers', icon: Users },

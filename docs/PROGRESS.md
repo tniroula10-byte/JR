@@ -14,6 +14,7 @@
 | 2 | Real Supabase adapter (no mock fallback), migration `00003_live_data_layer.sql` (all RPCs, sanitized `c_*` customer reads, locked-down writes), spin bonus removed, boss seed with password, OTP email template | ✅ Done (`feat/step2-real-supabase`) |
 | 3 | RLS fixes | ✅ Folded into step 2 (00003). Remaining: storage upload policies review in step 6 |
 | 4 | Testing: `test:db` (8), live-DB Playwright `test:e2e:live` (5 flows), demo Playwright repaired (3), unit (42); CI runs all on every push/PR | ✅ Done (`feat/step4-testing`) |
+| 4b | Game top-ups feature (D-22): games, payment methods/tags with rotate or sticky rule, top-up requests, staff Loaded / Not received; unit 5, DB 1 suite, live E2E 1 flow | ✅ Done (`feat/topups`) |
 | 5 | Upgrade Next.js & vulnerable deps, durable rate limiting, regenerate `apply_all.sql` | ⏳ |
 | 6 | Resend email, signed uploads, Web Push, Sentry | ⏳ |
 | 7 | Staging deploy, 3-role walkthrough, production | ⏳ |

@@ -46,17 +46,17 @@ test.describe('John Rambo — demo-mode screens, chat anonymity, guards and PWA'
     const sections: Array<{ persona: string; routes: string[]; shots: string[] }> = [
       {
         persona: 'cust-1',
-        routes: ['/home', '/products', '/offers', '/chat', '/tickets', '/stories', '/announcements', '/notifications', '/profile'],
+        routes: ['/home', '/topups', '/products', '/offers', '/chat', '/tickets', '/stories', '/announcements', '/notifications', '/profile'],
         shots: ['/home', '/products', '/chat', '/tickets']
       },
       {
         persona: 'emp-1',
-        routes: ['/employee/dashboard', '/employee/inbox', '/employee/tickets', '/employee/offers', '/employee/boss-chat', '/employee/announcements', '/employee/performance', '/employee/invite-customer'],
+        routes: ['/employee/dashboard', '/employee/inbox', '/employee/topups', '/employee/tickets', '/employee/offers', '/employee/boss-chat', '/employee/announcements', '/employee/performance', '/employee/invite-customer'],
         shots: ['/employee/dashboard', '/employee/inbox', '/employee/tickets']
       },
       {
         persona: 'boss-1',
-        routes: ['/boss/dashboard', '/boss/inbox', '/boss/tickets', '/boss/analytics', '/boss/customers', '/boss/employees', '/boss/threads', '/boss/products', '/boss/stories', '/boss/announcements', '/boss/settings', '/boss/audit'],
+        routes: ['/boss/dashboard', '/boss/inbox', '/boss/topups', '/boss/tickets', '/boss/analytics', '/boss/customers', '/boss/employees', '/boss/threads', '/boss/products', '/boss/stories', '/boss/announcements', '/boss/settings', '/boss/audit'],
         shots: ['/boss/dashboard', '/boss/inbox', '/boss/analytics', '/boss/settings']
       }
     ];

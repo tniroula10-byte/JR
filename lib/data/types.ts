@@ -32,6 +32,8 @@ export type TicketEventType =
   | 'closed';
 export type AnnouncementPriority = 'normal' | 'important' | 'urgent';
 export type StoryKind = 'text' | 'image' | 'video';
+export type PaymentTagMode = 'rotate' | 'sticky';
+export type TopupStatus = 'waiting' | 'loaded' | 'not_received';
 
 export interface Profile {
   id: string;
@@ -101,7 +103,65 @@ export interface AppSettings {
   ticketAutoCloseDays: number;
   offerSanityMaxPaise: number;
   businessHoursOnly: boolean;
+  /** 'rotate': next tag after every N deposits. 'sticky': each customer keeps one tag per method. */
+  paymentTagMode: PaymentTagMode;
+  paymentTagRotateEvery: number;
   updatedBy: string | null;
+  updatedAt: string;
+}
+
+/** Games customers can top up (at most 11 active), managed by staff. */
+export interface Game {
+  id: string;
+  name: string;
+  active: boolean;
+  sortOrder: number;
+}
+
+/** A payment handle (e.g. a Cash App $tag) under a payment method. */
+export interface PaymentTag {
+  id: string;
+  methodId: string;
+  tag: string;
+  active: boolean;
+  sortOrder: number;
+  depositCount: number;
+  isCurrent: boolean; // rotate mode: the tag customers are shown right now
+}
+
+/** Payment method (at most 3 active) with its tags; staff-only view. */
+export interface PaymentMethod {
+  id: string;
+  name: string;
+  active: boolean;
+  sortOrder: number;
+  tags: PaymentTag[];
+}
+
+/** What a customer sees in the payment pop-up: one tag per active method. */
+export interface PaymentOption {
+  methodId: string;
+  methodName: string;
+  tag: string;
+}
+
+export interface TopupRequest {
+  id: string;
+  refNo: number;
+  customerId: string;
+  customerName?: string;
+  conversationId: string;
+  gameId: string;
+  gameName: string;
+  gameUsername: string;
+  amountCents: number;
+  methodName: string;
+  tag: string;
+  status: TopupStatus;
+  staffNote: string | null;
+  handledBy: string | null; // null for customers
+  handledByName?: string | null; // staff-only
+  createdAt: string;
   updatedAt: string;
 }
 
@@ -683,6 +743,43 @@ export interface DataRepository {
   ): Promise<Story>;
   recordStoryView(caller: CallerContext, storyId: string): Promise<void>;
   purgeExpiredStories(nowIso?: string): Promise<number>;
+
+  // Game Top-ups
+  listGames(caller: CallerContext): Promise<Game[]>;
+  upsertGame(
+    caller: CallerContext,
+    input: { id?: string; name: string; active: boolean; sortOrder: number }
+  ): Promise<Game>;
+  listPaymentMethods(caller: CallerContext): Promise<PaymentMethod[]>;
+  upsertPaymentMethod(
+    caller: CallerContext,
+    input: { id?: string; name: string; active: boolean; sortOrder: number }
+  ): Promise<PaymentMethod>;
+  upsertPaymentTag(
+    caller: CallerContext,
+    input: { id?: string; methodId: string; tag: string; active: boolean; sortOrder: number }
+  ): Promise<PaymentTag>;
+  setCustomerPaymentTag(
+    caller: CallerContext,
+    input: { customerId: string; methodId: string; tagId: string }
+  ): Promise<void>;
+  getPaymentOptions(caller: CallerContext): Promise<PaymentOption[]>;
+  getMyGameUsernames(caller: CallerContext): Promise<Record<string, string>>;
+  submitTopup(
+    caller: CallerContext,
+    input: {
+      gameId: string;
+      gameUsername: string;
+      amountCents: number;
+      methodId: string;
+      clientRequestId: string;
+    }
+  ): Promise<TopupRequest>;
+  listTopups(caller: CallerContext): Promise<TopupRequest[]>;
+  updateTopupStatus(
+    caller: CallerContext,
+    input: { topupId: string; status: 'loaded' | 'not_received'; note?: string }
+  ): Promise<TopupRequest>;
 
   // Notifications & Push
   listNotifications(caller: CallerContext): Promise<AppNotification[]>;

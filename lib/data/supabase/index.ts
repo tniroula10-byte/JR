@@ -28,11 +28,15 @@ import type {
   DataRepository,
   EmployeePerformanceMetrics,
   EmployeeWithFlags,
+  Game,
   Invitation,
   Offer,
   OfferEvent,
   OutboundEmailNotice,
   PasswordAuthResult,
+  PaymentMethod,
+  PaymentOption,
+  PaymentTag,
   PerformanceQueryFilter,
   Product,
   ProductStatus,
@@ -52,6 +56,7 @@ import type {
   TicketEvent,
   TicketPriority,
   TicketStatus,
+  TopupRequest,
   UserStatus
 } from '@/lib/data/types';
 
@@ -276,6 +281,48 @@ function mapTicketMessage(m: Row, customerName: string): CustomerTicketMessageVi
     customerSenderId: m.sender_kind === 'customer' ? m.customer_sender_id : null,
     body: m.body,
     createdAt: m.created_at
+  };
+}
+
+function mapGame(g: Row): Game {
+  return { id: g.id, name: g.name, active: g.active, sortOrder: g.sort_order };
+}
+
+function mapTag(t: Row, currentTagId: string | null): PaymentTag {
+  return {
+    id: t.id,
+    methodId: t.method_id,
+    tag: t.tag,
+    active: t.active,
+    sortOrder: t.sort_order,
+    depositCount: t.deposit_count,
+    isCurrent: t.id === currentTagId
+  };
+}
+
+function mapTopupCamel(r: Row): TopupRequest {
+  return { ...(r as TopupRequest), amountCents: Number(r.amountCents) };
+}
+
+function mapStaffTopup(r: Row, dir: Directory): TopupRequest {
+  return {
+    id: r.id,
+    refNo: r.ref_no,
+    customerId: r.customer_id,
+    customerName: nameOf(dir, r.customer_id) ?? undefined,
+    conversationId: r.conversation_id,
+    gameId: r.game_id,
+    gameName: r.game_name,
+    gameUsername: r.game_username,
+    amountCents: Number(r.amount_cents),
+    methodName: r.method_name,
+    tag: r.tag_text,
+    status: r.status,
+    staffNote: r.staff_note,
+    handledBy: r.handled_by,
+    handledByName: nameOf(dir, r.handled_by),
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
   };
 }
 
@@ -1586,6 +1633,144 @@ export class SupabaseDataRepository implements DataRepository {
     // Expired stories are hidden by list_stories(); rows are kept (no hard deletes).
     // Removing expired media files from Storage is handled with the upload work (step 6).
     return 0;
+  }
+
+  // ---- Game Top-ups -----------------------------------------------------------------
+
+  async listGames(_caller: CallerContext): Promise<Game[]> {
+    const supabase = await createSupabaseServerClient();
+    return rpc<Game[]>(supabase, 'list_games');
+  }
+
+  async upsertGame(
+    _caller: CallerContext,
+    input: { id?: string; name: string; active: boolean; sortOrder: number }
+  ): Promise<Game> {
+    const supabase = await createSupabaseServerClient();
+    return mapGame(
+      await rpc<Row>(supabase, 'upsert_game', {
+        p_id: input.id ?? null,
+        p_name: input.name,
+        p_active: input.active,
+        p_sort_order: input.sortOrder
+      })
+    );
+  }
+
+  async listPaymentMethods(_caller: CallerContext): Promise<PaymentMethod[]> {
+    const supabase = await createSupabaseServerClient();
+    const [methods, tags] = await Promise.all([
+      rows(supabase.from('payment_methods').select('*').order('sort_order').order('name')),
+      rows(supabase.from('payment_tags').select('*').order('sort_order').order('created_at'))
+    ]);
+    return methods.map((m) => ({
+      id: m.id,
+      name: m.name,
+      active: m.active,
+      sortOrder: m.sort_order,
+      tags: tags.filter((t) => t.method_id === m.id).map((t) => mapTag(t, m.current_tag_id))
+    }));
+  }
+
+  async upsertPaymentMethod(
+    caller: CallerContext,
+    input: { id?: string; name: string; active: boolean; sortOrder: number }
+  ): Promise<PaymentMethod> {
+    const supabase = await createSupabaseServerClient();
+    const row = await rpc<Row>(supabase, 'upsert_payment_method', {
+      p_id: input.id ?? null,
+      p_name: input.name,
+      p_active: input.active,
+      p_sort_order: input.sortOrder
+    });
+    return (await this.listPaymentMethods(caller)).find((m) => m.id === row.id)!;
+  }
+
+  async upsertPaymentTag(
+    _caller: CallerContext,
+    input: { id?: string; methodId: string; tag: string; active: boolean; sortOrder: number }
+  ): Promise<PaymentTag> {
+    const supabase = await createSupabaseServerClient();
+    const row = await rpc<Row>(supabase, 'upsert_payment_tag', {
+      p_id: input.id ?? null,
+      p_method_id: input.methodId,
+      p_tag: input.tag,
+      p_active: input.active,
+      p_sort_order: input.sortOrder
+    });
+    return mapTag(row, null);
+  }
+
+  async setCustomerPaymentTag(
+    _caller: CallerContext,
+    input: { customerId: string; methodId: string; tagId: string }
+  ): Promise<void> {
+    const supabase = await createSupabaseServerClient();
+    await rpc(supabase, 'set_customer_payment_tag', {
+      p_customer_id: input.customerId,
+      p_method_id: input.methodId,
+      p_tag_id: input.tagId
+    });
+  }
+
+  async getPaymentOptions(_caller: CallerContext): Promise<PaymentOption[]> {
+    const supabase = await createSupabaseServerClient();
+    return rpc<PaymentOption[]>(supabase, 'c_get_payment_options');
+  }
+
+  async getMyGameUsernames(caller: CallerContext): Promise<Record<string, string>> {
+    const supabase = await createSupabaseServerClient();
+    const list = await rows(
+      supabase.from('customer_game_accounts').select('game_id, username').eq('customer_id', caller.userId)
+    );
+    return Object.fromEntries(list.map((r) => [r.game_id as string, r.username as string]));
+  }
+
+  async submitTopup(
+    _caller: CallerContext,
+    input: {
+      gameId: string;
+      gameUsername: string;
+      amountCents: number;
+      methodId: string;
+      clientRequestId: string;
+    }
+  ): Promise<TopupRequest> {
+    const supabase = await createSupabaseServerClient();
+    return mapTopupCamel(
+      await rpc<Row>(supabase, 'submit_topup', {
+        p_game_id: input.gameId,
+        p_game_username: input.gameUsername,
+        p_amount_cents: input.amountCents,
+        p_method_id: input.methodId,
+        p_client_request_id: input.clientRequestId
+      })
+    );
+  }
+
+  async listTopups(caller: CallerContext): Promise<TopupRequest[]> {
+    const supabase = await createSupabaseServerClient();
+    if (caller.role === 'customer') {
+      return (await rpc<Row[]>(supabase, 'c_list_topups')).map(mapTopupCamel);
+    }
+    const [list, dir] = await Promise.all([
+      rows(supabase.from('topup_requests').select('*').order('created_at', { ascending: false }).limit(300)),
+      loadDirectory(supabase)
+    ]);
+    return list.map((r) => mapStaffTopup(r, dir));
+  }
+
+  async updateTopupStatus(
+    _caller: CallerContext,
+    input: { topupId: string; status: 'loaded' | 'not_received'; note?: string }
+  ): Promise<TopupRequest> {
+    const supabase = await createSupabaseServerClient();
+    const row = await rpc<Row>(supabase, 'update_topup_status', {
+      p_topup_id: input.topupId,
+      p_status: input.status,
+      p_note: input.note ?? null
+    });
+    return mapStaffTopup(row, await loadDirectory(supabase));
   }
 
   // ---- Notifications & Push -------------------------------------------------------------

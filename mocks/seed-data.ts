@@ -12,6 +12,7 @@
 import type {
   ActivityEvent,
   AppNotification,
+  TopupRequest,
   AppSettings,
   AuditLogEntry,
   ComplaintChatMessage,
@@ -19,6 +20,7 @@ import type {
   Conversation,
   CustomerAnnouncement,
   EmployeeWithFlags,
+  Game,
   Invitation,
   MessageAttribution,
   Offer,
@@ -36,6 +38,24 @@ import type {
   Ticket,
   TicketEvent
 } from '@/lib/data/types';
+
+export interface MockPaymentMethod {
+  id: string;
+  name: string;
+  active: boolean;
+  sortOrder: number;
+  currentTagId: string | null;
+  depositsOnCurrent: number;
+}
+
+export interface MockPaymentTag {
+  id: string;
+  methodId: string;
+  tag: string;
+  active: boolean;
+  sortOrder: number;
+  depositCount: number;
+}
 
 export interface RawMessageRecord {
   id: string;
@@ -94,7 +114,36 @@ export interface MockDatabaseState {
   pushSubscriptions: PushSubscriptionRecord[];
   activityEvents: ActivityEvent[];
   auditLogs: AuditLogEntry[];
+  games?: Game[];
+  paymentMethods?: MockPaymentMethod[];
+  paymentTags?: MockPaymentTag[];
+  customerPaymentTags?: Array<{ customerId: string; methodId: string; tagId: string }>;
+  customerGameAccounts?: Array<{ customerId: string; gameId: string; username: string }>;
+  topups?: TopupRequest[];
 }
+
+const demoGames: Game[] = [
+  'Valorant',
+  'PUBG Mobile',
+  'Free Fire',
+  'Fortnite',
+  'Roblox',
+  'Call of Duty Mobile'
+].map((name, i) => ({ id: `game-${i + 1}`, name, active: true, sortOrder: i + 1 }));
+
+const demoPaymentMethods: MockPaymentMethod[] = [
+  { id: 'pm-1', name: 'Cash App', active: true, sortOrder: 1, currentTagId: 'tag-1a', depositsOnCurrent: 0 },
+  { id: 'pm-2', name: 'Venmo', active: true, sortOrder: 2, currentTagId: 'tag-2a', depositsOnCurrent: 0 },
+  { id: 'pm-3', name: 'Zelle', active: true, sortOrder: 3, currentTagId: 'tag-3a', depositsOnCurrent: 0 }
+];
+
+const demoPaymentTags: MockPaymentTag[] = [
+  { id: 'tag-1a', methodId: 'pm-1', tag: '$JRdemo1', active: true, sortOrder: 1, depositCount: 0 },
+  { id: 'tag-1b', methodId: 'pm-1', tag: '$JRdemo2', active: true, sortOrder: 2, depositCount: 0 },
+  { id: 'tag-2a', methodId: 'pm-2', tag: '@jr-demo-1', active: true, sortOrder: 1, depositCount: 0 },
+  { id: 'tag-2b', methodId: 'pm-2', tag: '@jr-demo-2', active: true, sortOrder: 2, depositCount: 0 },
+  { id: 'tag-3a', methodId: 'pm-3', tag: 'pay1@example.com', active: true, sortOrder: 1, depositCount: 0 }
+];
 
 export function createInitialMockState(): MockDatabaseState {
   const now = new Date();
@@ -391,6 +440,8 @@ export function createInitialMockState(): MockDatabaseState {
       ticketAutoCloseDays: 7,
       offerSanityMaxPaise: 100_000_000,
       businessHoursOnly: false,
+      paymentTagMode: 'rotate',
+      paymentTagRotateEvery: 5,
       updatedBy: 'boss-1',
       updatedAt: hoursAgo(24)
     },
@@ -426,7 +477,13 @@ export function createInitialMockState(): MockDatabaseState {
     notifications: [],
     pushSubscriptions: [],
     activityEvents: [],
-    auditLogs: []
+    auditLogs: [],
+    games: demoGames.map((g) => ({ ...g })),
+    paymentMethods: demoPaymentMethods.map((m) => ({ ...m })),
+    paymentTags: demoPaymentTags.map((t) => ({ ...t })),
+    customerPaymentTags: [],
+    customerGameAccounts: [],
+    topups: []
   };
 }
 

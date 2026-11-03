@@ -324,6 +324,66 @@ describe.skipIf(!live)('live database: roles, RPCs and RLS', () => {
     expect(custView).not.toContain(bossId);
   });
 
+  it('top-ups: limits, tag rotation, sticky tags, staff status, and customer privacy', async () => {
+    const game = (await ok(boss.rpc('upsert_game', { p_id: null, p_name: `Game ${RUN}`, p_active: true, p_sort_order: 1 }))) as { id: string };
+    const method = (await ok(e1.rpc('upsert_payment_method', { p_id: null, p_name: `Pay ${RUN}`, p_active: true, p_sort_order: 1 }))) as { id: string };
+    const tagA = (await ok(e1.rpc('upsert_payment_tag', { p_id: null, p_method_id: method.id, p_tag: `$A${RUN}`, p_active: true, p_sort_order: 1 }))) as { id: string };
+    await ok(e1.rpc('upsert_payment_tag', { p_id: null, p_method_id: method.id, p_tag: `$B${RUN}`, p_active: true, p_sort_order: 2 }));
+
+    // Customers cannot manage, read the tag tables, or drive the rotation directly
+    await denied(c1.rpc('upsert_game', { p_id: null, p_name: 'x', p_active: true, p_sort_order: 1 }), /Staff authority/);
+    expect(await ok(c1.from('payment_tags').select('id'))).toEqual([]);
+    expect(await ok(c1.from('payment_methods').select('id'))).toEqual([]);
+    await denied(c1.rpc('resolve_payment_tag', { p_customer_id: c1Id, p_method_id: method.id, p_consume: true }), /permission denied/);
+
+    // Rotate (default): the tag moves on after every 5 deposits
+    await ok(boss.rpc('update_app_settings', { p_patch: { paymentTagMode: 'rotate', paymentTagRotateEvery: 5 } }));
+    const seen: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const r = (await ok(c1.rpc('submit_topup', {
+        p_game_id: game.id, p_game_username: 'player1', p_amount_cents: 1500,
+        p_method_id: method.id, p_client_request_id: `rot-${RUN}-${i}`
+      }))) as { tag: string; handledBy: unknown };
+      expect(r.handledBy).toBeNull();
+      seen.push(r.tag);
+    }
+    expect(seen).toEqual([...Array(5).fill(`$A${RUN}`), `$B${RUN}`]);
+
+    // Sticky: a customer keeps the tag staff gave them
+    await ok(boss.rpc('update_app_settings', { p_patch: { paymentTagMode: 'sticky' } }));
+    await ok(e1.rpc('set_customer_payment_tag', { p_customer_id: c2Id, p_method_id: method.id, p_tag_id: tagA.id }));
+    const opts = (await ok(c2.rpc('c_get_payment_options'))) as Array<{ methodId: string; tag: string }>;
+    expect(opts.find((o) => o.methodId === method.id)?.tag).toBe(`$A${RUN}`);
+    for (let i = 0; i < 6; i++) {
+      const r = (await ok(c2.rpc('submit_topup', {
+        p_game_id: game.id, p_game_username: 'player2', p_amount_cents: 1500,
+        p_method_id: method.id, p_client_request_id: `sticky-${RUN}-${i}`
+      }))) as { tag: string };
+      expect(r.tag).toBe(`$A${RUN}`);
+    }
+    await ok(boss.rpc('update_app_settings', { p_patch: { paymentTagMode: 'rotate' } }));
+
+    // Staff see the request (and an unread chat message); status updates are one-time
+    const { data: req } = await e1.from('topup_requests').select('id, status, message_id').eq('client_request_id', `rot-${RUN}-0`).single();
+    expect(req!.status).toBe('waiting');
+    expect(req!.message_id).not.toBeNull();
+    await denied(c1.rpc('update_topup_status', { p_topup_id: req!.id, p_status: 'loaded' }), /Staff authority/);
+    await ok(e1.rpc('update_topup_status', { p_topup_id: req!.id, p_status: 'loaded', p_note: 'Enjoy' }));
+    await denied(e1.rpc('update_topup_status', { p_topup_id: req!.id, p_status: 'not_received' }), /already marked/);
+
+    const mine = (await ok(c1.rpc('c_list_topups'))) as Array<Record<string, unknown>>;
+    expect(mine.find((t) => t.id === req!.id)?.status).toBe('loaded');
+    expect(JSON.stringify(mine)).not.toContain(e1Id);
+    expect(JSON.stringify(await ok(c2.rpc('c_list_topups')))).not.toContain(req!.id);
+    expect(await ok(c1.from('topup_requests').select('id'))).toEqual([]);
+
+    // Bad input
+    await denied(c1.rpc('submit_topup', {
+      p_game_id: game.id, p_game_username: 'p', p_amount_cents: 50,
+      p_method_id: method.id, p_client_request_id: `bad-${RUN}`
+    }), /INVALID_AMOUNT/);
+  });
+
   it('suspension takes effect immediately; logs are append-only for everyone', async () => {
     await ok(boss.rpc('set_user_status', { p_target: c2Id, p_status: 'suspended' }));
     expect(await ok(c2.rpc('c_get_conversation'))).toBeNull();

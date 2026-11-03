@@ -31,6 +31,7 @@ import {
   sendCustomerMessageAction
 } from '@/actions';
 import { CustomerCatalogClient } from '@/components/catalog/customer-catalog';
+import { CustomerTopupButton } from '@/components/topups/customer-topup-flow';
 import { StoryViewerClient } from '@/components/stories/story-viewer';
 import { Badge, BrandLogo, Button, Card, EmptyState, Input } from '@/components/ui/primitives';
 import type {
@@ -195,6 +196,7 @@ export function CustomerHomeClient({
             </h1>
           </div>
           <div className="flex flex-wrap gap-2.5">
+            <CustomerTopupButton />
             <Button
               size="sm"
               onClick={() => setChatExpanded((prev) => !prev)}
