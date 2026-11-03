@@ -29,6 +29,8 @@ function isPublicPath(pathname: string): boolean {
     pathname.startsWith('/callback') ||
     pathname.startsWith('/welcome') ||
     pathname.startsWith('/offline') ||
+    pathname === '/privacy' ||
+    pathname === '/terms' ||
     // API routes authenticate and authorize every request themselves
     pathname.startsWith('/api/') ||
     pathname === '/manifest.webmanifest' ||

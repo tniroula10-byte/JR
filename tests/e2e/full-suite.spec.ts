@@ -126,6 +126,12 @@ test.describe('John Rambo — demo-mode screens, chat anonymity, guards and PWA'
     await expect(page).toHaveURL(/\/login\?error=account_suspended/);
     await expect(page.getByRole('alert').first()).toContainText('suspended');
 
+    // Legal pages are readable without signing in
+    for (const path of ['/privacy', '/terms']) {
+      const res = await request.get(path, { maxRedirects: 0 });
+      expect(res.status(), path).toBe(200);
+    }
+
     const manifestRes = await request.get('/manifest.webmanifest');
     expect(manifestRes.status()).toBe(200);
     const manifestJson = await manifestRes.json();

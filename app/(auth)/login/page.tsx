@@ -11,6 +11,7 @@
  */
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
@@ -287,6 +288,11 @@ function LoginContent() {
             </form>
           )}
         </Card>
+
+        <p className="text-center text-xs text-slate-500">
+          <Link href="/privacy" className="underline">Privacy Policy</Link> •{' '}
+          <Link href="/terms" className="underline">Terms of Service</Link>
+        </p>
       </div>
     </div>
   );
