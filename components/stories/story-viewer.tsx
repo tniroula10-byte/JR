@@ -114,6 +114,23 @@ export function StoryViewerClient({ stories }: { stories: Story[] }) {
           <Badge tone="amber" className="uppercase">
             {activeStory.kind} DROP
           </Badge>
+          {activeStory.mediaUrl && activeStory.kind === 'image' ? (
+            // eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL
+            <img
+              src={activeStory.mediaUrl}
+              alt={activeStory.caption}
+              className="mx-auto max-h-72 w-auto rounded-2xl object-contain"
+            />
+          ) : null}
+          {activeStory.mediaUrl && activeStory.kind === 'video' ? (
+            <video
+              src={activeStory.mediaUrl}
+              controls
+              playsInline
+              muted
+              className="mx-auto max-h-72 w-auto rounded-2xl"
+            />
+          ) : null}
           <p className="text-lg sm:text-2xl font-extrabold text-white leading-snug">
             {activeStory.caption}
           </p>

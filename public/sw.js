@@ -63,3 +63,20 @@ self.addEventListener('push', (event) => {
     })
   );
 });
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const link = (event.notification.data && event.notification.data.link) || '/notifications';
+  const target = new URL(link, self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+      for (const w of windows) {
+        if (w.url.startsWith(self.location.origin) && 'focus' in w) {
+          w.navigate(target);
+          return w.focus();
+        }
+      }
+      return self.clients.openWindow(target);
+    })
+  );
+});

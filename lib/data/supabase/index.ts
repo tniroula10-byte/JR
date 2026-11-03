@@ -11,7 +11,8 @@ import { createClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { buildPerformanceCsv, calculateEmployeeMetrics } from '@/lib/analytics/metrics';
-import { validateBasicPasswordFormat } from '@/lib/validation/schemas';
+import { sendEmail } from '@/lib/email';
+import { UploadSignRequestSchema, validateBasicPasswordFormat } from '@/lib/validation/schemas';
 import type {
   ActivityEvent,
   AnnouncementPriority,
@@ -64,6 +65,7 @@ import type {
 type Row = Record<string, any>;
 
 const SUPPORT_NAME = 'John Rambo Support';
+const STORY_BUCKET = 'story-media';
 const GROUP_THREAD_KEY = 'sthread-group';
 
 type ServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
@@ -819,10 +821,19 @@ export class SupabaseDataRepository implements DataRepository {
       p_decision: input.decision,
       p_note: input.note ?? null
     });
-    return {
-      profile: mapProfileRow(res.profile),
-      emailNotice: res.emailNotice as OutboundEmailNotice
-    };
+    const notice = res.emailNotice as OutboundEmailNotice;
+
+    // The decision is already committed; email delivery is best-effort and recorded
+    const sent = await sendEmail({ to: notice.to, subject: notice.subject, text: notice.body });
+    await createSupabaseAdminClient()
+      .from('outbound_emails')
+      .update({
+        delivery_status: sent.ok ? 'sent' : sent.reason,
+        delivery_error: sent.ok ? null : (sent.error ?? null)
+      })
+      .eq('id', notice.id);
+
+    return { profile: mapProfileRow(res.profile), emailNotice: notice };
   }
 
   async listSentEmails(_caller: CallerContext): Promise<OutboundEmailNotice[]> {
@@ -1602,7 +1613,45 @@ export class SupabaseDataRepository implements DataRepository {
 
   async listStories(_caller: CallerContext, includeExpiredForStaff = false): Promise<Story[]> {
     const supabase = await createSupabaseServerClient();
-    return rpc<Story[]>(supabase, 'list_stories', { p_include_expired: includeExpiredForStaff });
+    const stories = await rpc<Story[]>(supabase, 'list_stories', {
+      p_include_expired: includeExpiredForStaff
+    });
+    const paths = stories.map((st) => st.mediaPath).filter((p): p is string => Boolean(p));
+    if (paths.length === 0) return stories;
+
+    // Private bucket: viewers get short-lived signed links, never the raw object path
+    const { data: signed } = await createSupabaseAdminClient()
+      .storage.from(STORY_BUCKET)
+      .createSignedUrls(paths, 60 * 60);
+    const urlByPath = new Map((signed ?? []).map((x) => [x.path, x.signedUrl]));
+    return stories.map((st) => ({
+      ...st,
+      mediaUrl: st.mediaPath ? (urlByPath.get(st.mediaPath) ?? null) : null
+    }));
+  }
+
+  async createStoryMediaUpload(
+    caller: CallerContext,
+    input: { fileName: string; mimeType: string; byteSize: number }
+  ): Promise<{ path: string; signedUrl: string }> {
+    const parsed = UploadSignRequestSchema.safeParse({ bucket: STORY_BUCKET, ...input });
+    if (!parsed.success) {
+      throw new Error(`UPLOAD_VALIDATION_FAILED: ${parsed.error.issues[0]?.message ?? 'Invalid file.'}`);
+    }
+    const supabase = await createSupabaseServerClient();
+    if (!(await rpc<boolean>(supabase, 'has_staff_flag', { p_flag: 'can_publish_stories' }))) {
+      throw new Error('FORBIDDEN: Caller lacks can_publish_stories permission.');
+    }
+    const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'video/mp4': 'mp4' }[
+      parsed.data.mimeType
+    ];
+    // Folder = uploader id; create_story() only accepts files from the caller's own folder
+    const path = `${caller.userId}/${crypto.randomUUID()}.${ext}`;
+    const { data, error } = await createSupabaseAdminClient()
+      .storage.from(STORY_BUCKET)
+      .createSignedUploadUrl(path);
+    if (error || !data) fail(error);
+    return { path, signedUrl: data.signedUrl };
   }
 
   async createStory(
@@ -1629,10 +1678,28 @@ export class SupabaseDataRepository implements DataRepository {
     await rpc(supabase, 'record_story_view', { p_story_id: storyId });
   }
 
-  async purgeExpiredStories(_nowIso?: string): Promise<number> {
-    // Expired stories are hidden by list_stories(); rows are kept (no hard deletes).
-    // Removing expired media files from Storage is handled with the upload work (step 6).
-    return 0;
+  /** Removes expired stories' media files from Storage; the story rows are kept. */
+  async purgeExpiredStories(nowIso?: string): Promise<number> {
+    const admin = createSupabaseAdminClient();
+    const cutoff = nowIso ?? new Date().toISOString();
+    const expired = await rows(
+      admin
+        .from('stories')
+        .select('id, media_path')
+        .lt('expires_at', cutoff)
+        .not('media_path', 'is', null)
+        .is('media_purged_at', null)
+        .limit(500)
+    );
+    if (expired.length === 0) return 0;
+
+    const { error } = await admin.storage.from(STORY_BUCKET).remove(expired.map((st) => st.media_path));
+    if (error) fail(error);
+    await admin
+      .from('stories')
+      .update({ media_purged_at: new Date().toISOString() })
+      .in('id', expired.map((st) => st.id));
+    return expired.length;
   }
 
   // ---- Game Top-ups -----------------------------------------------------------------

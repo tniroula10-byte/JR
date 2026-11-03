@@ -75,11 +75,17 @@ jobs:
       - name: Start local Supabase and apply migrations
         run: |
           supabase start -x edge-runtime,logflare,vector,imgproxy,supavisor,studio
-          supabase status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY)=' \
+          supabase status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY|MAILPIT_URL)=' \
             | sed -e 's/^API_URL=/NEXT_PUBLIC_SUPABASE_URL=/' \
                   -e 's/^ANON_KEY=/NEXT_PUBLIC_SUPABASE_ANON_KEY=/' \
                   -e 's/^SERVICE_ROLE_KEY=/SUPABASE_SERVICE_ROLE_KEY=/' \
                   -e 's/"//g' >> "$GITHUB_ENV"
+
+      - name: Test-only Web Push keys and alert inbox
+        run: |
+          node -e "const k=require('web-push').generateVAPIDKeys();console.log('NEXT_PUBLIC_VAPID_PUBLIC_KEY='+k.publicKey);console.log('VAPID_PRIVATE_KEY='+k.privateKey)" >> "$GITHUB_ENV"
+          echo "VAPID_SUBJECT=mailto:alerts@test.local" >> "$GITHUB_ENV"
+          echo "ALERT_EMAIL=alerts@test.local" >> "$GITHUB_ENV"
 
       - name: Seed the Boss account
         run: npx tsx scripts/seed-boss.ts

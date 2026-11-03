@@ -152,6 +152,21 @@ test('boss invites a customer, who sets a password with the emailed code and is 
   const { data: cust } = await admin.from('profiles').select('id').eq('email', people.customerEmail).single();
   people.customerId = cust!.id;
 
+  // The approval email was actually delivered and recorded
+  await expect
+    .poll(async () => {
+      const res = await fetch(`${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:${people.customerEmail}`)}`);
+      const list = (await res.json()) as { messages: Array<{ Subject: string }> };
+      return list.messages.some((m) => m.Subject === 'Your John Rambo Account is Active');
+    })
+    .toBe(true);
+  const { data: emailRow } = await admin
+    .from('outbound_emails')
+    .select('delivery_status')
+    .eq('related_user_id', people.customerId)
+    .single();
+  expect(emailRow!.delivery_status).toBe('sent');
+
   const customer = await signInUi(browser, people.customerEmail, PASSWORD);
   await expect(customer).toHaveURL(/\/home/);
   await expect(customer.getByText(`Welcome back, ${people.customerName}`)).toBeVisible();
@@ -306,6 +321,32 @@ test('top-up: customer picks a game, amount and payment tag; employee marks it l
   await customer.goto('/chat');
   await expect(customer.getByText(/has been loaded/).first()).toBeVisible();
   expect(await customer.content()).not.toContain(people.employeeId);
+});
+
+test('boss publishes an image story; the customer sees the picture', async ({ browser }) => {
+  const boss = await signInUi(browser, people.bossEmail, BOSS_PASSWORD);
+  await boss.goto('/boss/stories');
+  await boss.selectOption('#story-kind', 'image');
+  await boss.setInputFiles('#story-file', {
+    name: 'drop.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64'
+    )
+  });
+  const caption = `Picture drop ${RUN}`;
+  await boss.fill('#story-caption', caption);
+  await boss.getByRole('button', { name: /Publish 24h Story/ }).click();
+  await expect(boss.getByRole('status').filter({ hasText: 'published' })).toBeVisible();
+
+  const customer = await signInUi(browser, people.customerEmail, PASSWORD);
+  await customer.goto('/stories');
+  const img = customer.getByRole('img', { name: caption });
+  await expect(img).toBeVisible();
+  // The browser really loaded the file through its short-lived signed link
+  await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  expect(await img.getAttribute('src')).toContain('token=');
 });
 
 test('repeated wrong passwords lock the account out for 15 minutes', async ({ browser }) => {

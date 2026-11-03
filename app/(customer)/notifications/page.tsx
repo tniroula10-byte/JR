@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { Bell, CheckCheck } from 'lucide-react';
 import { markAllNotificationsReadAction } from '@/actions';
 import { Badge, Button, Card, EmptyState } from '@/components/ui/primitives';
+import { EnablePushButton } from '@/components/shared/enable-push-button';
 import { requireActiveSession } from '@/lib/auth/session';
 import { getDataRepository } from '@/lib/data';
 import { formatIST } from '@/lib/time';
@@ -18,11 +19,14 @@ export default async function NotificationsPage() {
         <div>
           <h1 className="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-2">
             <Bell className="h-5 w-5 text-violet-400" aria-hidden="true" />
-            <span>In-App Notifications</span>
+            <span>Notifications</span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-400">
-            Real-time alerts for offers, chat replies, tickets, and announcements.
+            Chat replies, top-ups, tickets and announcements.
           </p>
+          <div className="mt-2">
+            <EnablePushButton />
+          </div>
         </div>
 
         {notifications.some((n) => !n.readAt) ? (

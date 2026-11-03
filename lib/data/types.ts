@@ -400,6 +400,7 @@ export interface Story {
   authorIsBoss: boolean;
   kind: StoryKind;
   mediaPath: string | null;
+  mediaUrl?: string | null; // short-lived signed URL for image/video stories
   caption: string;
   bgStyle: string;
   createdAt: string;
@@ -742,6 +743,11 @@ export interface DataRepository {
     }
   ): Promise<Story>;
   recordStoryView(caller: CallerContext, storyId: string): Promise<void>;
+  /** Issues a one-time signed upload URL for story media after checking permission and file type. */
+  createStoryMediaUpload(
+    caller: CallerContext,
+    input: { fileName: string; mimeType: string; byteSize: number }
+  ): Promise<{ path: string; signedUrl: string }>;
   purgeExpiredStories(nowIso?: string): Promise<number>;
 
   // Game Top-ups

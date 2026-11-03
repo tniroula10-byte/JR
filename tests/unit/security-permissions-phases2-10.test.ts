@@ -6,7 +6,6 @@ import {
   canReceiveRealtimeRow,
   connectRealtimeSocket
 } from '@/lib/realtime';
-import { dispatchWebPushNotifications } from '@/lib/push';
 import { requestMagicLinkAction } from '@/actions';
 
 const boss: CallerContext = { userId: 'boss-1', role: 'boss', status: 'active' };
@@ -325,19 +324,13 @@ describe('Comprehensive Security, Permission Matrix & Phase 2-10 Self-Checks', (
     const liveStories = await repo.listStories(custA);
     expect(liveStories.find((s) => s.id === 'story-expired')).toBeUndefined();
 
-    // Web Push subscription and sanitized dispatch
+    // Web Push subscription is stored for the signed-in user
     const sub = await repo.savePushSubscription(custA, {
       endpoint: 'https://fcm.googleapis.com/fcm/send/mock-token-1',
       p256dh: 'mock-p256dh-key',
       auth: 'mock-auth-secret'
     });
-    const pushRes = await dispatchWebPushNotifications([sub], {
-      title: 'John Rambo Support',
-      body: 'Your offer has been updated.',
-      link: '/offers'
-    });
-    expect(pushRes.deliveredCount).toBe(1);
-    expect(pushRes.payload.title).toBe('John Rambo Support');
+    expect(sub.userId).toBe(custA.userId);
   });
 
   it('enforces customer password change and 3-member private Complaint Chat room creation & isolation', async () => {

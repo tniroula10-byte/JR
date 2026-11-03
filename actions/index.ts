@@ -12,6 +12,17 @@ import { revalidatePath } from 'next/cache';
 import { getDataRepository, hasLiveSupabaseKeys, isDemoAuthAllowed } from '@/lib/data';
 import { requireActiveSession, MOCK_SESSION_COOKIE } from '@/lib/auth/session';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { after } from 'next/server';
+import { flushPendingPush } from '@/lib/push';
+
+/** Sends phone notifications for anything the action just created, after the response. */
+function pushSoon() {
+  try {
+    after(() => flushPendingPush().catch(() => undefined));
+  } catch {
+    // Outside a request (e.g. unit tests): nothing to flush
+  }
+}
 import { checkRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
 import { allowAuthAttempt, clearAuthAttempts } from '@/lib/auth/login-throttle';
 import {
@@ -359,6 +370,7 @@ export async function sendCustomerMessageAction(rawInput: {
     revalidatePath('/chat');
     revalidatePath('/employee/inbox');
     revalidatePath('/boss/inbox');
+    pushSoon();
     return { ok: true, data: msg };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Message send failed' };
@@ -381,6 +393,7 @@ export async function sendStaffMessageAction(rawInput: {
     revalidatePath('/chat');
     revalidatePath('/employee/inbox');
     revalidatePath('/boss/inbox');
+    pushSoon();
     return { ok: true, data: msg };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Reply send failed' };
@@ -420,6 +433,7 @@ export async function submitOfferAction(rawInput: {
     revalidatePath('/chat');
     revalidatePath('/employee/offers');
     revalidatePath('/boss/inbox');
+    pushSoon();
     return { ok: true, data: result };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Offer submission failed' };
@@ -444,6 +458,7 @@ export async function respondToOfferAction(rawInput: {
     revalidatePath('/chat');
     revalidatePath('/employee/offers');
     revalidatePath('/boss/inbox');
+    pushSoon();
     return { ok: true, data: updated };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Offer response failed' };
@@ -470,6 +485,7 @@ export async function acceptCounterOfferAction(offerId: string) {
     const updated = await repo.acceptCounterOffer(caller, offerId);
     revalidatePath('/offers');
     revalidatePath('/chat');
+    pushSoon();
     return { ok: true, data: updated };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Accept counter failed' };
@@ -494,6 +510,7 @@ export async function createTicketAction(rawInput: {
     revalidatePath('/tickets');
     revalidatePath('/employee/tickets');
     revalidatePath('/boss/tickets');
+    pushSoon();
     return { ok: true, data: ticket };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Ticket creation failed' };
@@ -511,6 +528,7 @@ export async function assignTicketAction(rawInput: { ticketId: string; employeeI
     const ticket = await repo.assignTicket(caller, parsed.data);
     revalidatePath('/boss/tickets');
     revalidatePath('/employee/tickets');
+    pushSoon();
     return { ok: true, data: ticket };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Assign failed' };
@@ -529,6 +547,7 @@ export async function replyTicketAction(rawInput: { ticketId: string; body: stri
     revalidatePath('/tickets');
     revalidatePath('/employee/tickets');
     revalidatePath('/boss/tickets');
+    pushSoon();
     return { ok: true, data: msg };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Ticket reply failed' };
@@ -593,6 +612,7 @@ export async function createStaffAnnouncementAction(rawInput: {
     const ann = await repo.createStaffAnnouncement(caller, parsed.data);
     revalidatePath('/boss/announcements');
     revalidatePath('/employee/announcements');
+    pushSoon();
     return { ok: true, data: ann };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to post announcement' };
@@ -739,6 +759,7 @@ export async function sendComplaintChatMessageAction(rawInput: {
     revalidatePath('/tickets');
     revalidatePath('/employee/tickets');
     revalidatePath('/boss/tickets');
+    pushSoon();
     return { ok: true, data: msg };
   } catch (err) {
     return {
@@ -791,6 +812,7 @@ export async function submitTopupAction(rawInput: {
     const repo = getDataRepository();
     const topup = await repo.submitTopup(caller, parsed.data);
     revalidateTopups();
+    pushSoon();
     return { ok: true, data: topup };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Top-up request failed' };
@@ -811,6 +833,7 @@ export async function updateTopupStatusAction(rawInput: {
     const repo = getDataRepository();
     const topup = await repo.updateTopupStatus(caller, parsed.data);
     revalidateTopups();
+    pushSoon();
     return { ok: true, data: topup };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Status update failed' };
@@ -912,5 +935,19 @@ export async function updateTopupSettingsAction(rawInput: {
     return { ok: true, data: settings };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Settings update failed' };
+  }
+}
+
+export async function createStoryUploadAction(rawInput: {
+  fileName: string;
+  mimeType: string;
+  byteSize: number;
+}) {
+  const { caller } = await requireActiveSession(['boss', 'employee']);
+  try {
+    const upload = await getDataRepository().createStoryMediaUpload(caller, rawInput);
+    return { ok: true, data: upload };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Upload could not start' };
   }
 }

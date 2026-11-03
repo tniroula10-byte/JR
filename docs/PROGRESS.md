@@ -16,7 +16,7 @@
 | 4 | Testing: `test:db` (8), live-DB Playwright `test:e2e:live` (5 flows), demo Playwright repaired (3), unit (42); CI runs all on every push/PR | ✅ Done (`feat/step4-testing`) |
 | 4b | Game top-ups feature (D-22): games, payment methods/tags with rotate or sticky rule, top-up requests, staff Loaded / Not received; unit 5, DB 1 suite, live E2E 1 flow | ✅ Done (`feat/topups`) |
 | 5 | Security updates: Next 15.1.7→15.5.28, React 19.3, Supabase libs, zod 4, Resend 6, Playwright 1.64, vitest 5; unused Serwist removed; nested PostCSS pinned via `overrides`; `npm audit` 0 vulnerabilities. DB-backed login/code/password-change throttle (`00005_login_throttle.sql`, per account + per IP). Production CSP without `unsafe-eval`. | ✅ Done (`feat/step5-security`) |
-| 6 | Resend email, signed uploads, Web Push, Sentry | ⏳ |
+| 6 | Integrations: approval/rejection emails (Resend REST, Mailpit locally) with delivery status; server-error alert emails via `instrumentation.ts` (replaces Sentry); story image/video upload via one-time signed URLs + signed viewing links, `create_story` only accepts the caller's own uploaded file; Web Push (`web-push`, VAPID) sent after mutating actions and by the nightly job, dead devices pruned, "Turn on phone notifications" button; nightly cleanup of expired story media (`00006_delivery_tracking.sql`). Tests: integration 4 (email, alert, push, media), live E2E +2. | ✅ Done (`feat/step6-integrations`) |
 | 7 | Staging deploy, 3-role walkthrough, production | ⏳ |
 
 - **Step 4 verification (2026-11-03)**: unit 42/42; `test:db` 8/8; `test:e2e:live` 5/5 (invite → emailed code → approval → sign-in, chat anonymity, $ counter-offer accepted, ticket assign/reply, suspension lockout); demo `test:e2e` 3/3 (29 screens × 4 widths, no overflow); lint, typecheck, build clean. CI: `verify` job + new `live-database` job (Supabase CLI in GitHub Actions).
@@ -26,7 +26,8 @@
 - **How to run locally against a real DB**: `npx supabase start` → `npx supabase db reset` → export local keys (`npx supabase status -o env`) → `BOSS_EMAIL=… BOSS_PASSWORD=… BOSS_FULL_NAME=… npx tsx scripts/seed-boss.ts` → `npx next dev`.
 - **Known issues**: Playwright demo suite still has 2 stale-name failures (pre-existing). Stories' expired media is not yet deleted from Storage (step 6). Customer email change waits for Supabase confirmation link (needs email delivery, step 6).
 - **Operator**: delete the empty `jr-live-db` bucket; decide on logo; accounts for steps 6–7.
-- **Next Action**: Step 6 — Resend email delivery (invite codes, approval notices), signed uploads, Web Push, Sentry, story media cleanup.
+- **Next Action**: Step 7 — operator creates Supabase Pro project, Resend domain, Vercel project; then apply migrations 00001–00006, seed Boss, deploy staging, 3-role walkthrough, production.
+- **Not yet verified end to end**: a real server error triggering the alert email (alert sending is tested directly); Web Push on a real phone (delivery tested against a local HTTPS stand-in); Resend REST path (needs a real key — Mailpit path tested).
 
 ---
 

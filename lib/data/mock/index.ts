@@ -2888,6 +2888,13 @@ export class MockDataRepository implements DataRepository {
     }
   }
 
+  async createStoryMediaUpload(
+    _caller: CallerContext,
+    _input: { fileName: string; mimeType: string; byteSize: number }
+  ): Promise<{ path: string; signedUrl: string }> {
+    throw new Error('UPLOADS_UNAVAILABLE: Image and video uploads need the real database (not demo mode).');
+  }
+
   async purgeExpiredStories(nowIso?: string): Promise<number> {
     const state = getState();
     const cutoff = nowIso ? new Date(nowIso).getTime() : Date.now();

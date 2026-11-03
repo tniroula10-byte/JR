@@ -45,7 +45,7 @@ npx supabase db push
 
 ---
 
-## Step 3: Configure Resend Custom SMTP (For Magic-Link Auth Emails)
+## Step 3: Configure Resend Custom SMTP (For the 6-Digit Invite Code Emails)
 
 1. Sign in to [https://resend.com](https://resend.com), add and verify your sending domain.
 2. Generate an API Key (`re_...`).
@@ -76,10 +76,12 @@ Required keys in `.env.local`:
 - `BOSS_PASSWORD` (at least 12 characters; used once to create the Boss login — remove it from the file afterwards)
 - `BOSS_USERNAME` (optional, e.g. `BOKA10`) and `BOSS_PUBLIC_ALIAS` (name customers see in complaint rooms, e.g. `BOKA`)
 - `BOSS_FULL_NAME`
-- `BOSS_PHONE` (E.164 format, e.g. `+919876543210`)
-- `RESEND_API_KEY`
-- `CRON_SECRET` (run `openssl rand -hex 32` to generate)
-- `NEXT_PUBLIC_VAPID_PUBLIC_KEY` & `VAPID_PRIVATE_KEY` (run `npx web-push generate-vapid-keys` to generate)
+- `BOSS_PHONE` (optional, with country code, e.g. `+14155550199`)
+- `RESEND_API_KEY` (the app also uses it to send approval / rejection emails)
+- `EMAIL_FROM_ADDRESS` (e.g. `John Rambo Support <support@yourdomain.com>`, on the domain verified in Resend)
+- `ALERT_EMAIL` (where server error alerts are emailed — your own address)
+- `CRON_SECRET` (run `openssl rand -hex 32` to generate; Vercel sends it to the nightly job automatically)
+- `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (run `npx web-push generate-vapid-keys`) and `VAPID_SUBJECT` (`mailto:` + your email) — for phone notifications
 
 ---
 
