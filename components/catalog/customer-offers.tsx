@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Check, Coins, MessageSquare, XCircle } from 'lucide-react';
+import { Check, MessageSquare, XCircle } from 'lucide-react';
 import { acceptCounterOfferAction, withdrawOfferAction } from '@/actions';
 import { Badge, Button, Card, EmptyState } from '@/components/ui/primitives';
 import type { Offer } from '@/lib/data/types';
@@ -71,13 +71,6 @@ export function CustomerOffersClient({ offers }: { offers: Offer[] }) {
             Track your price offers with John Rambo Support.
           </p>
         </div>
-        <Link
-          href="/home#catalog-section"
-          className="inline-flex h-9 items-center gap-2 rounded-xl bg-violet-600 px-3.5 text-xs font-semibold text-white shadow-violet-glow hover:bg-violet-500"
-        >
-          <Coins className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>New Product Offer</span>
-        </Link>
       </div>
 
       {feedback ? (
@@ -88,8 +81,8 @@ export function CustomerOffersClient({ offers }: { offers: Offer[] }) {
 
       {offers.length === 0 ? (
         <EmptyState
-          title="No price offers submitted yet"
-          description="Browse the Game Points Catalog to propose your price."
+          title="No price offers yet"
+          description="To discuss a price, message John Rambo Support in Chat."
         />
       ) : (
         <div className="space-y-3">
