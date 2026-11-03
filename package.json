@@ -15,7 +15,8 @@
     "verify:rls": "tsx scripts/verify-rls.ts",
     "seed:boss": "tsx scripts/seed-boss.ts",
     "load:check": "tsx scripts/load-check-60.ts",
-    "test:db": "vitest run --config vitest.integration.config.ts"
+    "test:db": "vitest run --config vitest.integration.config.ts",
+    "test:e2e:live": "playwright test --config playwright.live.config.ts"
   },
   "dependencies": {
     "@serwist/next": "9.0.12",

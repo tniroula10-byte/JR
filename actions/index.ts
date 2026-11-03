@@ -12,7 +12,7 @@ import { revalidatePath } from 'next/cache';
 import { getDataRepository, hasLiveSupabaseKeys, isDemoAuthAllowed } from '@/lib/data';
 import { requireActiveSession, MOCK_SESSION_COOKIE } from '@/lib/auth/session';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { checkRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
+import { checkRateLimit, clearRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
 import {
   AppSettingsUpdateSchema,
   AssignTicketSchema,
@@ -123,10 +123,8 @@ export async function loginWithPasswordAction(rawInput: {
   email: string;
   password: string;
 }) {
-  const rl = checkRateLimit(
-    `password-login:${rawInput.email.trim().toLowerCase()}`,
-    RATE_LIMIT_PRESETS.LOGIN_EMAIL
-  );
+  const rateKey = `password-login:${rawInput.email.trim().toLowerCase()}`;
+  const rl = checkRateLimit(rateKey, RATE_LIMIT_PRESETS.LOGIN_EMAIL);
   if (!rl.allowed) {
     return {
       ok: false,
@@ -153,6 +151,8 @@ export async function loginWithPasswordAction(rawInput: {
       error: res.error ?? 'Invalid email or password.'
     };
   }
+  // Only failed attempts should count towards the lockout
+  clearRateLimit(rateKey);
 
   if (isDemoAuthAllowed()) {
     const cookieStore = await cookies();

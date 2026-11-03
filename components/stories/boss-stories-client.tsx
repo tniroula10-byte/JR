@@ -82,7 +82,7 @@ export function BossStoriesClient({ stories }: { stories: Story[] }) {
               id="story-caption"
               rows={2}
               required
-              placeholder="🔥 FLASH DROP: 60,000 BGMI UC packs restocked for immediate rupee negotiation!"
+              placeholder="e.g. New Valorant points packs just restocked!"
               value={caption}
               onChange={(e) => setCaption(e.target.value)}
             />

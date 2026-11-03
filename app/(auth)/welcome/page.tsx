@@ -12,7 +12,7 @@ export default function WelcomePage() {
         <Badge tone="emerald">INVITATION VERIFIED</Badge>
         <h1 className="text-xl font-bold text-white">Welcome to John Rambo</h1>
         <p className="text-sm text-slate-400">
-          Your single-use magic link has been verified. All game point inquiries and INR negotiations are end-to-end protected.
+          Your account is verified.
         </p>
         <Link
           href="/"

@@ -7,7 +7,7 @@ import { z } from 'zod';
 export const E164PhoneSchema = z
   .string()
   .trim()
-  .regex(/^\+[1-9]\d{6,14}$/, 'Phone must be in E.164 format (e.g., +919876543210)');
+  .regex(/^\+[1-9]\d{6,14}$/, 'Phone must start with + and the country code (e.g., +14155550199)');
 
 export const EmailSchema = z
   .string()

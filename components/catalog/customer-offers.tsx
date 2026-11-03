@@ -68,7 +68,7 @@ export function CustomerOffersClient({ offers }: { offers: Offer[] }) {
         <div>
           <h1 className="text-xl sm:text-2xl font-extrabold text-white">My Price Offers</h1>
           <p className="text-xs sm:text-sm text-slate-400">
-            Track live rupee negotiations with John Rambo Support.
+            Track your price offers with John Rambo Support.
           </p>
         </div>
         <Link
@@ -89,7 +89,7 @@ export function CustomerOffersClient({ offers }: { offers: Offer[] }) {
       {offers.length === 0 ? (
         <EmptyState
           title="No price offers submitted yet"
-          description="Browse the Game Points Catalog to propose your price in Indian Rupees."
+          description="Browse the Game Points Catalog to propose your price."
         />
       ) : (
         <div className="space-y-3">

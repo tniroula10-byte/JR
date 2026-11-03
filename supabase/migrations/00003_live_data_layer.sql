@@ -517,15 +517,37 @@ AS $$
   WHERE r.ticket_id = p_ticket_id AND r.customer_id = auth.uid() AND public.is_customer();
 $$;
 
--- Employees a customer may name in a complaint ticket (public alias only)
-CREATE OR REPLACE FUNCTION public.list_reportable_staff_aliases()
-RETURNS TABLE (staff_id uuid, public_alias text)
+-- Staff a customer may pick or name in a ticket. Customers never receive staff ids
+-- (Decision 4): the public alias (unique) is the selection key, resolved in create_ticket.
+DROP FUNCTION IF EXISTS public.get_selectable_staff_aliases();
+CREATE OR REPLACE FUNCTION public.get_selectable_staff_aliases()
+RETURNS TABLE (selection_key text, public_alias text)
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
-  SELECT sp.user_id, sp.public_alias
+  SELECT sp.public_alias, sp.public_alias
+  FROM public.staff_profiles sp
+  JOIN public.profiles p ON p.id = sp.user_id
+  CROSS JOIN public.app_settings s
+  WHERE public.is_active()
+    AND s.customer_can_pick_employee = true
+    AND p.role = 'employee'
+    AND p.status = 'active'
+    AND sp.customer_selectable = true
+    AND sp.accepts_tickets = true
+  ORDER BY sp.public_alias;
+$$;
+
+CREATE OR REPLACE FUNCTION public.list_reportable_staff_aliases()
+RETURNS TABLE (selection_key text, public_alias text)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT sp.public_alias, sp.public_alias
   FROM public.staff_profiles sp
   JOIN public.profiles p ON p.id = sp.user_id
   WHERE public.is_active()
@@ -1318,7 +1340,7 @@ CREATE OR REPLACE FUNCTION public.create_ticket(
   p_description text,
   p_category text,
   p_priority public.ticket_priority,
-  p_requested_employee_id uuid DEFAULT NULL
+  p_requested_employee_alias text DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -1344,16 +1366,15 @@ BEGIN
      WHERE customer_id = auth.uid() AND created_at > now() - interval '1 hour'),
     5, 'tickets');
 
-  IF p_requested_employee_id IS NOT NULL THEN
-    IF NOT EXISTS (
-      SELECT 1 FROM public.staff_profiles sp
-      JOIN public.profiles p ON p.id = sp.user_id
-      WHERE sp.user_id = p_requested_employee_id
-        AND p.role = 'employee' AND p.status = 'active' AND sp.accepts_tickets
-    ) THEN
+  IF NULLIF(trim(COALESCE(p_requested_employee_alias, '')), '') IS NOT NULL THEN
+    SELECT sp.user_id INTO v_assigned
+    FROM public.staff_profiles sp
+    JOIN public.profiles p ON p.id = sp.user_id
+    WHERE sp.public_alias = trim(p_requested_employee_alias)
+      AND p.role = 'employee' AND p.status = 'active' AND sp.accepts_tickets;
+    IF v_assigned IS NULL THEN
       RAISE EXCEPTION 'INVALID_EMPLOYEE_SELECTION: Selected staff alias is not selectable.';
     END IF;
-    v_assigned := p_requested_employee_id;
     v_status := 'assigned';
   END IF;
 
@@ -1942,6 +1963,10 @@ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM public.profiles WHERE email = lower(trim(p_email))) THEN
     RAISE EXCEPTION 'CONFLICT: A user with this email already exists.';
+  END IF;
+  IF NULLIF(trim(COALESCE(p_phone, '')), '') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM public.profiles WHERE phone = trim(p_phone)) THEN
+    RAISE EXCEPTION 'CONFLICT: Phone number is already in use.';
   END IF;
   IF p_role = 'employee' AND NOT p_has_password THEN
     RAISE EXCEPTION 'INVALID_INPUT: Employees need an initial password set by the Boss.';

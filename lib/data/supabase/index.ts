@@ -374,7 +374,7 @@ export class SupabaseDataRepository implements DataRepository {
     const supabase = await createSupabaseServerClient();
     if (caller.role === 'customer') {
       const list = await rpc<Row[]>(supabase, 'get_selectable_staff_aliases');
-      return list.map((r) => ({ staffId: r.staff_id, publicAlias: r.public_alias }));
+      return list.map((r) => ({ staffId: r.selection_key, publicAlias: r.public_alias }));
     }
     const employees = await this.listEmployeesWithFlags(caller);
     return employees
@@ -388,7 +388,7 @@ export class SupabaseDataRepository implements DataRepository {
   async listReportableStaffAliases(_caller: CallerContext): Promise<SelectableStaffAlias[]> {
     const supabase = await createSupabaseServerClient();
     const list = await rpc<Row[]>(supabase, 'list_reportable_staff_aliases');
-    return list.map((r) => ({ staffId: r.staff_id, publicAlias: r.public_alias }));
+    return list.map((r) => ({ staffId: r.selection_key, publicAlias: r.public_alias }));
   }
 
   async updateCustomerOwnProfile(
@@ -1244,7 +1244,8 @@ export class SupabaseDataRepository implements DataRepository {
       p_description: input.description,
       p_category: input.category,
       p_priority: input.priority,
-      p_requested_employee_id: input.requestedEmployeeId ?? null
+      // Customers select by public alias; staff ids never reach the browser
+      p_requested_employee_alias: input.requestedEmployeeId ?? null
     });
   }
 

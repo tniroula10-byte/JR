@@ -262,7 +262,7 @@ describe.skipIf(!live)('live database: roles, RPCs and RLS', () => {
     const t = (await ok(
       c1.rpc('create_ticket', {
         p_subject: 'Points missing', p_description: 'My points never arrived', p_category: 'points_delivery',
-        p_priority: 'high', p_requested_employee_id: null
+        p_priority: 'high', p_requested_employee_alias: null
       })
     )) as { id: string; status: string };
     expect(t.status).toBe('open');
@@ -282,11 +282,16 @@ describe.skipIf(!live)('live database: roles, RPCs and RLS', () => {
     expect(await ok(c2.rpc('c_list_ticket_events', { p_ticket_id: t.id }))).toEqual([]);
     expect(await ok(c2.from('ticket_messages').select('id').eq('ticket_id', t.id))).toEqual([]);
 
+    // Customers choose staff by alias; the list never carries staff ids
+    const reportable = await ok(c2.rpc('list_reportable_staff_aliases'));
+    expect(JSON.stringify(reportable)).toContain(`E1-${RUN}`);
+    expect(JSON.stringify(reportable)).not.toContain(e1Id);
+
     // Complaint naming an employee opens a private 3-member room
     const complaint = (await ok(
       c2.rpc('create_ticket', {
         p_subject: 'Complaint about staff', p_description: 'Rude reply in chat yesterday', p_category: 'general',
-        p_priority: 'normal', p_requested_employee_id: e1Id
+        p_priority: 'normal', p_requested_employee_alias: `E1-${RUN}`
       })
     )) as { id: string };
     await ok(e1.rpc('send_complaint_message', { p_ticket_id: complaint.id, p_body: 'Sorry about that' }));

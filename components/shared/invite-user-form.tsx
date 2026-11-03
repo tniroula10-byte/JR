@@ -25,7 +25,7 @@ export function InviteUserFormClient({
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('+14155550199');
+  const [phone, setPhone] = useState('');
   const [intendedRole, setIntendedRole] = useState<'customer' | 'employee'>('customer');
   const [publicAlias, setPublicAlias] = useState('');
   const [username, setUsername] = useState('');
@@ -62,6 +62,7 @@ export function InviteUserFormClient({
         );
         setEmail('');
         setFullName('');
+        setPhone('');
         setPublicAlias('');
         setUsername('');
         setInitialPassword('');
@@ -133,7 +134,7 @@ export function InviteUserFormClient({
 
           <div>
             <label htmlFor="inv-phone" className="block text-xs font-medium text-slate-300 mb-1">
-              Phone (US E.164 Format)
+              Phone (optional, e.g. +14155550199)
             </label>
             <Input
               id="inv-phone"

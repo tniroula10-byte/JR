@@ -91,7 +91,7 @@ export interface EmployeeWithFlags extends Profile {
  * Decision 7: Never exposes real name, email, or avatar.
  */
 export interface SelectableStaffAlias {
-  staffId: string;
+  staffId: string; // For customers this is the alias itself (selection key), never a staff id
   publicAlias: string;
 }
 

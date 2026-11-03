@@ -15,7 +15,7 @@ export function BossProductsClient({ products }: { products: Product[] }) {
   const [title, setTitle] = useState('');
   const [pointsQty, setPointsQty] = useState('50000');
   const [description, setDescription] = useState('');
-  const [rupeePrice, setRupeePrice] = useState('25000');
+  const [rupeePrice, setRupeePrice] = useState('25');
   const [status, setStatus] = useState<ProductStatus>('available');
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -39,7 +39,7 @@ export function BossProductsClient({ products }: { products: Product[] }) {
     try {
       pricePaise = parseRupeesToPaise(rupeePrice);
     } catch (err) {
-      setFeedback(err instanceof Error ? err.message : 'Invalid rupee price.');
+      setFeedback(err instanceof Error ? err.message : 'Invalid dollar price.');
       setSaving(false);
       return;
     }
@@ -153,7 +153,7 @@ export function BossProductsClient({ products }: { products: Product[] }) {
 
           <div>
             <label htmlFor="prod-price" className="block text-xs font-medium text-slate-300 mb-1">
-              Listed Price in Rupees (₹ — stored as paise)
+              Listed Price ($)
             </label>
             <Input
               id="prod-price"

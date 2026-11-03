@@ -70,3 +70,8 @@ export function checkRateLimit(
 export function resetRateLimits(): void {
   getStore().clear();
 }
+
+/** Forgets a key's history, e.g. after a successful login so only failures count. */
+export function clearRateLimit(key: string): void {
+  getStore().delete(key);
+}

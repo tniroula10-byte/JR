@@ -11,12 +11,12 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:3100',
     trace: 'on-first-retry',
-    channel: 'chrome'
+    channel: process.env.CI ? undefined : 'chrome'
   },
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], channel: 'chrome' }
+      use: { ...devices['Desktop Chrome'], channel: process.env.CI ? undefined : 'chrome' }
     }
   ],
   webServer: {

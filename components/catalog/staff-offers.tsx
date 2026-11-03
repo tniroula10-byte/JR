@@ -2,7 +2,7 @@
 
 /**
  * Staff Price Offer Negotiation Console (`components/catalog/staff-offers.tsx`)
- * Allows active staff (within scope) to Accept, Counter (in ₹ converted to paise), or Reject offers.
+ * Allows active staff (within scope) to Accept, Counter (in $ converted to cents), or Reject offers.
  */
 
 import React, { useState } from 'react';
@@ -30,7 +30,7 @@ export function StaffOffersClient({ offers }: { offers: Offer[] }) {
       try {
         counterPaise = parseRupeesToPaise(counterInputs[offer.id] ?? '');
       } catch (err) {
-        setFeedback(err instanceof Error ? err.message : 'Enter a valid rupee counter-offer.');
+        setFeedback(err instanceof Error ? err.message : 'Enter a valid dollar counter-offer.');
         setBusyId(null);
         return;
       }
@@ -63,7 +63,7 @@ export function StaffOffersClient({ offers }: { offers: Offer[] }) {
             <span>Price Offers & Negotiation Queue</span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-400">
-            Respond to customer rupee offers. Every response updates the customer chat card and logs handler attribution.
+            Accept, counter or reject customer offers. Customers see every response in their chat.
           </p>
         </div>
         <Button variant="ghost" size="sm" onClick={() => router.refresh()}>
@@ -150,11 +150,11 @@ export function StaffOffersClient({ offers }: { offers: Offer[] }) {
                           htmlFor={`counter-inr-${offer.id}`}
                           className="block text-[11px] text-slate-400 mb-1"
                         >
-                          Counter Price in Rupees (₹)
+                          Counter Price ($)
                         </label>
                         <Input
                           id={`counter-inr-${offer.id}`}
-                          placeholder="e.g. 39500"
+                          placeholder="e.g. 39.50"
                           value={counterInputs[offer.id] ?? ''}
                           onChange={(e) =>
                             setCounterInputs((prev) => ({ ...prev, [offer.id]: e.target.value }))
@@ -197,7 +197,7 @@ export function StaffOffersClient({ offers }: { offers: Offer[] }) {
                         onClick={() => handleAction(offer, 'counter')}
                       >
                         <Coins className="h-3.5 w-3.5" aria-hidden="true" />
-                        <span>Send Counter (₹)</span>
+                        <span>Send Counter</span>
                       </Button>
 
                       <Button

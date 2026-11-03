@@ -29,10 +29,73 @@ jobs:
         run: npm run typecheck
 
       - name: Verify PostgreSQL RLS Coverage on All Tables
-        run: npm run verify:rls
+        run: |
+          npm run verify:rls
+          git diff --exit-code supabase/apply_all.sql || (echo "supabase/apply_all.sql is stale: run npm run verify:rls and commit it" && exit 1)
 
       - name: Run Unit & Integration Tests (Vitest)
         run: npm test
 
       - name: Production Build Verification
         run: npm run build
+
+      - name: Demo-mode E2E (Playwright)
+        run: |
+          npx playwright install --with-deps chromium
+          JR_FORCE_MOCK=1 npm run build
+          npm run test:e2e
+
+  live-database:
+    # Real Postgres + Auth + RLS: database integration tests and live-mode browser flows
+    runs-on: ubuntu-latest
+    needs: verify
+    env:
+      BOSS_EMAIL: boss@test.local
+      BOSS_PASSWORD: CiBossPassword#2026
+      BOSS_FULL_NAME: CI Boss
+      BOSS_PUBLIC_ALIAS: BOKA
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start local Supabase and apply migrations
+        run: |
+          supabase start -x edge-runtime,logflare,vector,imgproxy,supavisor,studio
+          supabase status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY)=' \
+            | sed -e 's/^API_URL=/NEXT_PUBLIC_SUPABASE_URL=/' \
+                  -e 's/^ANON_KEY=/NEXT_PUBLIC_SUPABASE_ANON_KEY=/' \
+                  -e 's/^SERVICE_ROLE_KEY=/SUPABASE_SERVICE_ROLE_KEY=/' \
+                  -e 's/"//g' >> "$GITHUB_ENV"
+
+      - name: Seed the Boss account
+        run: npx tsx scripts/seed-boss.ts
+
+      - name: Database integration tests (RLS, RPCs, invites)
+        run: npm run test:db
+
+      - name: Live-database E2E (Playwright)
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e:live
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
