@@ -12,7 +12,8 @@ import { revalidatePath } from 'next/cache';
 import { getDataRepository, hasLiveSupabaseKeys, isDemoAuthAllowed } from '@/lib/data';
 import { requireActiveSession, MOCK_SESSION_COOKIE } from '@/lib/auth/session';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { checkRateLimit, clearRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
+import { checkRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
+import { allowAuthAttempt, clearAuthAttempts } from '@/lib/auth/login-throttle';
 import {
   AppSettingsUpdateSchema,
   AssignTicketSchema,
@@ -96,11 +97,7 @@ export async function verifyEmailOtpAndSetPasswordAction(rawInput: {
   fullName?: string;
   phone?: string;
 }) {
-  const rl = checkRateLimit(
-    `otp:${rawInput.email.trim().toLowerCase()}`,
-    RATE_LIMIT_PRESETS.LOGIN_EMAIL
-  );
-  if (!rl.allowed) {
+  if (!(await allowAuthAttempt('otp', rawInput.email))) {
     return { ok: false, error: 'Too many attempts. Please wait 15 minutes and try again.' };
   }
   if (!hasLiveSupabaseKeys() && !isDemoAuthAllowed()) {
@@ -130,9 +127,7 @@ export async function loginWithPasswordAction(rawInput: {
   email: string;
   password: string;
 }) {
-  const rateKey = `password-login:${rawInput.email.trim().toLowerCase()}`;
-  const rl = checkRateLimit(rateKey, RATE_LIMIT_PRESETS.LOGIN_EMAIL);
-  if (!rl.allowed) {
+  if (!(await allowAuthAttempt('password-login', rawInput.email))) {
     return {
       ok: false,
       code: 'INVALID_CREDENTIALS' as const,
@@ -159,7 +154,7 @@ export async function loginWithPasswordAction(rawInput: {
     };
   }
   // Only failed attempts should count towards the lockout
-  clearRateLimit(rateKey);
+  await clearAuthAttempts('password-login', rawInput.email);
 
   if (isDemoAuthAllowed()) {
     const cookieStore = await cookies();
@@ -707,6 +702,9 @@ export async function changeCustomerPasswordAction(rawInput: {
   confirmPassword: string;
 }) {
   const { caller } = await requireActiveSession(['customer']);
+  if (!(await allowAuthAttempt('password-change', caller.userId))) {
+    return { ok: false, error: 'Too many attempts. Please wait 15 minutes and try again.' };
+  }
   const parsed = ChangeCustomerPasswordSchema.safeParse(rawInput);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid password input.' };

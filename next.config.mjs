@@ -7,7 +7,8 @@ const nextConfig = {
   async headers() {
     const cspHeader = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      // 'unsafe-eval' is only needed by the development server (React Refresh)
+      `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : ''}`,
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' blob: data: https://images.unsplash.com https://*.supabase.co",
       "font-src 'self' data:",

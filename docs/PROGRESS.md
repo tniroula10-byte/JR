@@ -15,7 +15,7 @@
 | 3 | RLS fixes | ✅ Folded into step 2 (00003). Remaining: storage upload policies review in step 6 |
 | 4 | Testing: `test:db` (8), live-DB Playwright `test:e2e:live` (5 flows), demo Playwright repaired (3), unit (42); CI runs all on every push/PR | ✅ Done (`feat/step4-testing`) |
 | 4b | Game top-ups feature (D-22): games, payment methods/tags with rotate or sticky rule, top-up requests, staff Loaded / Not received; unit 5, DB 1 suite, live E2E 1 flow | ✅ Done (`feat/topups`) |
-| 5 | Upgrade Next.js & vulnerable deps, durable rate limiting, regenerate `apply_all.sql` | ⏳ |
+| 5 | Security updates: Next 15.1.7→15.5.28, React 19.3, Supabase libs, zod 4, Resend 6, Playwright 1.64, vitest 5; unused Serwist removed; nested PostCSS pinned via `overrides`; `npm audit` 0 vulnerabilities. DB-backed login/code/password-change throttle (`00005_login_throttle.sql`, per account + per IP). Production CSP without `unsafe-eval`. | ✅ Done (`feat/step5-security`) |
 | 6 | Resend email, signed uploads, Web Push, Sentry | ⏳ |
 | 7 | Staging deploy, 3-role walkthrough, production | ⏳ |
 
@@ -26,7 +26,7 @@
 - **How to run locally against a real DB**: `npx supabase start` → `npx supabase db reset` → export local keys (`npx supabase status -o env`) → `BOSS_EMAIL=… BOSS_PASSWORD=… BOSS_FULL_NAME=… npx tsx scripts/seed-boss.ts` → `npx next dev`.
 - **Known issues**: Playwright demo suite still has 2 stale-name failures (pre-existing). Stories' expired media is not yet deleted from Storage (step 6). Customer email change waits for Supabase confirmation link (needs email delivery, step 6).
 - **Operator**: delete the empty `jr-live-db` bucket; decide on logo; accounts for steps 6–7.
-- **Next Action**: Step 5 — upgrade Next.js and vulnerable dependencies, durable (DB-backed) login rate limiting.
+- **Next Action**: Step 6 — Resend email delivery (invite codes, approval notices), signed uploads, Web Push, Sentry, story media cleanup.
 
 ---
 

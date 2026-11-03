@@ -160,6 +160,21 @@ describe.skipIf(!live)('live database: roles, RPCs and RLS', () => {
     await denied(anonClient().rpc('get_app_settings'), /permission denied/);
   });
 
+  it('login throttle: 5 attempts per window, shared in the database, server-only', async () => {
+    const key = `test-key-${RUN}`;
+    const results: boolean[] = [];
+    for (let i = 0; i < 6; i++) {
+      results.push(await ok(admin.rpc('srv_throttle_hit', { p_key_hash: key, p_window_seconds: 900, p_max: 5 })));
+    }
+    expect(results).toEqual([true, true, true, true, true, false]);
+    await ok(admin.rpc('srv_throttle_clear', { p_key_hash: key }));
+    expect(await ok(admin.rpc('srv_throttle_hit', { p_key_hash: key, p_window_seconds: 900, p_max: 5 }))).toBe(true);
+
+    await denied(c1.rpc('srv_throttle_clear', { p_key_hash: key }), /permission denied/);
+    await denied(anonClient().rpc('srv_throttle_hit', { p_key_hash: key, p_window_seconds: 1, p_max: 99 }), /permission denied/);
+    expect(await ok(c1.from('auth_attempts').select('id'))).toEqual([]);
+  });
+
   it('products: permission flag required, hidden products invisible to customers', async () => {
     const prod = await ok(
       boss.rpc('upsert_product', {

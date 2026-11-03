@@ -280,10 +280,10 @@ test('top-up: customer picks a game, amount and payment tag; employee marks it l
   await customer.getByRole('dialog').getByRole('button', { name: gameName }).click();
   await customer.fill('#topup-username', 'ace_player');
   await customer.fill('#topup-amount', '40');
-  await customer.getByRole('button', { name: 'Next' }).click();
+  await customer.getByRole('dialog').getByRole('button', { name: 'Next', exact: true }).click();
   await customer.getByRole('radio', { name: new RegExp(tag.replace('$', '\\$')) }).click();
   await customer.screenshot({ path: 'docs/screenshots/topup-payment-mobile-390.png' });
-  await customer.getByRole('button', { name: 'Send request' }).click();
+  await customer.getByRole('dialog').getByRole('button', { name: 'Send request' }).click();
   await expect(customer.getByRole('dialog')).toContainText(/Request #\d+ sent/);
 
   const { data: req } = await admin
@@ -306,6 +306,21 @@ test('top-up: customer picks a game, amount and payment tag; employee marks it l
   await customer.goto('/chat');
   await expect(customer.getByText(/has been loaded/).first()).toBeVisible();
   expect(await customer.content()).not.toContain(people.employeeId);
+});
+
+test('repeated wrong passwords lock the account out for 15 minutes', async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await page.goto('/login');
+  const target = `nobody-${RUN}@test.local`;
+  for (let i = 0; i < 5; i++) {
+    await page.fill('#email-input', target);
+    await page.fill('#password-input', `wrong-${i}`);
+    await page.click('form button[type=submit]');
+    await expect(page.getByRole('alert').filter({ hasText: /Invalid/i })).toBeVisible();
+  }
+  await page.fill('#password-input', 'wrong-again');
+  await page.click('form button[type=submit]');
+  await expect(page.getByRole('alert').filter({ hasText: /Too many sign-in attempts/i })).toBeVisible();
 });
 
 test('suspension locks the customer out on the next page load', async ({ browser }) => {
