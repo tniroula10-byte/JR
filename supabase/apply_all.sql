@@ -4418,7 +4418,9 @@ CREATE TABLE IF NOT EXISTS public.auth_attempts (
 CREATE INDEX IF NOT EXISTS auth_attempts_key_time_idx ON public.auth_attempts (key_hash, attempted_at DESC);
 ALTER TABLE public.auth_attempts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.auth_attempts FORCE ROW LEVEL SECURITY;
--- No policies: clients can never read or write this table.
+-- Explicit deny-all: only SECURITY DEFINER functions (service role) touch this table.
+CREATE POLICY auth_attempts_no_client_access ON public.auth_attempts
+FOR ALL USING (false) WITH CHECK (false);
 
 -- Records an attempt and returns whether it is allowed (false once p_max is reached in the window).
 CREATE OR REPLACE FUNCTION public.srv_throttle_hit(p_key_hash text, p_window_seconds integer, p_max integer)
