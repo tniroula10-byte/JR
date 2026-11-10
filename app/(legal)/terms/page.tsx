@@ -10,10 +10,10 @@ export default function TermsPage() {
   return (
     <>
       <h1>Terms of Service</h1>
-      <p>Last updated: [DATE]</p>
+      <p>Last updated: November 10, 2026</p>
       <p>
-        These terms are an agreement between you and [COMPANY NAME] (&ldquo;we&rdquo;) for your use of John
-        Rambo. By using the service you agree to them. Questions: [CONTACT EMAIL].
+        These terms are an agreement between you and John Rambo (JR) (&ldquo;we&rdquo;) for your use of
+        this service. By using the service you agree to them. Questions: [CONTACT EMAIL].
       </p>
 
       <h2>Accounts</h2>
@@ -55,7 +55,7 @@ export default function TermsPage() {
       <p>[LIMITATION OF LIABILITY — to be written with legal advice.]</p>
 
       <h2>Governing law</h2>
-      <p>These terms are governed by the laws of [STATE], United States.</p>
+      <p>These terms are governed by the laws of the State of California, United States.</p>
 
       <h2>Changes</h2>
       <p>We may update these terms. We will change the date above and tell you about important changes in the app.</p>

@@ -10,9 +10,9 @@ export default function PrivacyPage() {
   return (
     <>
       <h1>Privacy Policy</h1>
-      <p>Last updated: [DATE]</p>
+      <p>Last updated: November 10, 2026</p>
       <p>
-        John Rambo (&ldquo;we&rdquo;, &ldquo;us&rdquo;) is operated by [COMPANY NAME]. This policy explains what
+        John Rambo (JR) (&ldquo;we&rdquo;, &ldquo;us&rdquo;) runs this service. This policy explains what
         information we collect when you use this invitation-only service and how we use it. Questions:
         [CONTACT EMAIL].
       </p>
@@ -54,7 +54,7 @@ export default function PrivacyPage() {
       <h2>How long we keep it</h2>
       <p>
         Messages, tickets and top-up records are kept for the life of your account so we have a complete
-        history, and for [RETENTION PERIOD] after it is closed. Pictures and videos in stories are deleted 24
+        history, and for at least 7 months after it is closed. Pictures and videos in stories are deleted 24
         hours after they expire.
       </p>
 
@@ -67,7 +67,8 @@ export default function PrivacyPage() {
       <p>
         You can update your name and phone number in your profile and turn phone notifications off in your
         device settings. To request a copy of your information, a correction or deletion, email [CONTACT EMAIL].
-        Residents of [STATE] may have additional rights under [STATE] law.
+        California residents may have additional rights under California law, including the right to
+        know, correct and delete the personal information we hold about them.
       </p>
 
       <h2>Age</h2>
