@@ -3,7 +3,7 @@
  * Decision 2: A one-time, idempotent seed script reads `BOSS_EMAIL` from the environment
  * and creates the single boss. A partial unique index guarantees there is only one boss.
  *
- * Usage: BOSS_EMAIL=... BOSS_PASSWORD=... BOSS_FULL_NAME=... npm run seed:boss
+ * Usage: npx tsx --env-file=.env.boss scripts/seed-boss.ts   (see docs/HUMAN-TODO.md, Step 5)
  * Runs outside Next.js, so it builds its own service-role client instead of importing
  * the `server-only` modules under `lib/`.
  */
@@ -14,7 +14,7 @@ import { hasLiveSupabaseKeys } from '../lib/supabase/env';
 function required(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
-    throw new Error(`Missing ${name}. Set it in .env.local or on the command line.`);
+    throw new Error(`Missing ${name}. Set it in the --env-file (see docs/HUMAN-TODO.md, Step 5).`);
   }
   return value;
 }
